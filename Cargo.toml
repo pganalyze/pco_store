@@ -3,6 +3,10 @@ name = "pco_store"
 version = "0.1.0"
 edition = "2024"
 license = "MIT"
+include = ["src/**/*.rs", "Cargo.toml", "README.md"]
+description = "Easy to use numeric compression"
+categories = ["compression", "database"]
+keywords = ["compression", "timeseries", "postgres"]
 
 [lib]
 proc-macro = true
