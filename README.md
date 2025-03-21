@@ -3,11 +3,16 @@
 [crates_badge]: https://img.shields.io/crates/v/pco_store.svg
 [crates_url]: https://crates.io/crates/pco_store
 
-This crate uses [pco](https://github.com/mwlon/pcodec) to get the best possible compression ratio for numeric data, extending it with an easy to use API so you don't have to convert between row and columnar data structures yourself.
+This crate uses [pco](https://github.com/pcodec/pcodec) to get the best possible compression ratio for numeric data, extending it with an easy to use API so you don't have to convert between row and columnar data structures yourself.
 
 Postgres is currently required, though contributions are welcome to support other storage models.
 
 To see the generated code, look in [tests/expand](tests/expand) or run `cargo expand --test tests`.
+
+## Supported data types
+
+- pco supports `u16`, `u32`, `u64`, `i16`, `i32`, `i64`, `f16`, `f32`, `f64`
+- pco_store additionally supports `SystemTime`, `bool`
 
 ## Performance
 

@@ -6,6 +6,7 @@ use std::time::{Duration, SystemTime};
 #[test]
 fn macrotest() {
     macrotest::expand("tests/expand/query_stats.rs");
+    macrotest::expand("tests/expand/query_stats_boolean.rs");
     macrotest::expand("tests/expand/query_stats_float_round.rs");
 }
 
@@ -448,4 +449,35 @@ async fn float_round() {
         // If the floats were simply truncated this would be 2.468, but rounding gets it to 2.47
         assert_eq!(total_time, 2.47);
     }
+}
+
+#[tokio::test]
+#[serial_test::serial]
+async fn boolean() {
+    #[pco_store::store(group_by = [database_id])]
+    #[derive(Clone, Debug, PartialEq)]
+    pub struct QueryStat {
+        pub database_id: i64,
+        pub calls: i64,
+        pub toplevel: bool,
+    }
+    let database_id = 1;
+    let db = &DB_POOL.get().await.unwrap();
+    let sql = "
+        DROP TABLE IF EXISTS query_stats;
+        CREATE TABLE query_stats (
+            database_id bigint NOT NULL,
+            calls bytea STORAGE EXTERNAL NOT NULL,
+            toplevel bytea STORAGE EXTERNAL NOT NULL
+        );
+    ";
+    db.batch_execute(sql).await.unwrap();
+
+    // Write
+    let stats = vec![QueryStat { database_id, calls: 1, toplevel: true }, QueryStat { database_id, calls: 2, toplevel: false }];
+    QueryStats::store(db, stats.clone()).await.unwrap();
+
+    // Read
+    let group = QueryStats::load(db, &[database_id]).await.unwrap().remove(0);
+    assert_eq!(stats, group.decompress().unwrap());
 }

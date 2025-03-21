@@ -141,7 +141,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
         let ident = field.ident.clone().unwrap();
         let ty_original = field.ty.clone();
         let mut ty = field.ty.clone();
-        let round_float_field = float_round.is_some() && quote! { #ty }.to_string().to_string().starts_with("f");
+        let round_float_field = float_round.is_some() && quote! { #ty }.to_string().starts_with("f");
         if group_by.iter().any(|i| *i == ident) {
             decompressed_fields.push(quote! { #ident: self.#ident, });
         } else {
@@ -150,6 +150,9 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
             }
             if round_float_field {
                 ty = Type::Verbatim(quote! { i64 });
+            }
+            if quote! { #ty_original }.to_string() == "bool" {
+                ty = Type::Verbatim(quote! { u16 });
             }
             decompress_fields.push(quote! {
                 let #ident: Vec<#ty> = if self.#ident.is_empty() {
@@ -166,6 +169,10 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
             } else if round_float_field {
                 decompressed_fields.push(quote! {
                     #ident: #ident.get(index).cloned().unwrap_or_default() as #ty_original / #float_round as #ty_original,
+                });
+            } else if quote! { #ty_original }.to_string() == "bool" {
+                decompressed_fields.push(quote! {
+                    #ident: #ident.get(index).cloned().unwrap_or_default() == 1,
                 });
             } else {
                 decompressed_fields.push(quote! {
@@ -192,9 +199,12 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
         let ident = field.ident.clone().unwrap();
         let ty_original = field.ty.clone();
         let mut ty = field.ty.clone();
-        let round_float_field = float_round.is_some() && quote! { #ty }.to_string().to_string().starts_with("f");
+        let round_float_field = float_round.is_some() && quote! { #ty }.to_string().starts_with("f");
         if round_float_field {
             ty = Type::Verbatim(quote! { i64 });
+        }
+        if quote! { #ty_original }.to_string() == "bool" {
+            ty = Type::Verbatim(quote! { u16 });
         }
         if group_by.iter().any(|i| *i == ident) {
             store_fields.push(ident.to_string());
@@ -217,6 +227,8 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
             store_types.push(Ident::new("BYTEA", Span::call_site()));
             let expr = if round_float_field {
                 quote! { (r.#ident * #float_round as #ty_original).round() as i64 }
+            } else if quote! { #ty_original }.to_string() == "bool" {
+                quote! { r.#ident as u16 }
             } else {
                 quote! { r.#ident }
             };
