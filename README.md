@@ -77,22 +77,22 @@ end_at >= now() - interval '7 days' AND start_at <= now()
 The stats can be written with `store`, read with `load` + `decompress`, and deleted with `delete`:
 
 ```rs
-async fn example() {
+async fn example() -> anyhow::Result<()> {
     let database_id = 1;
     let start = SystemTime::UNIX_EPOCH;
     let end = SystemTime::now();
-    let db = &DB_POOL.get().await.unwrap();
+    let db = &DB_POOL.get().await?;
 
     // Write
     let stats = vec![QueryStat { database_id, collected_at: end - Duration::from_secs(120), fingerprint: 1, calls: 1, total_time: 1.0 }];
-    QueryStats::store(db, stats).await.unwrap();
+    QueryStats::store(db, stats).await?;
     let stats = vec![QueryStat { database_id, collected_at: end - Duration::from_secs(60), fingerprint: 1, calls: 1, total_time: 1.0 }];
-    QueryStats::store(db, stats).await.unwrap();
+    QueryStats::store(db, stats).await?;
 
     // Read
     let mut calls = 0;
-    for group in QueryStats::load(db, &[database_id], start, end).await.unwrap() {
-        for stat in group.decompress().unwrap() {
+    for group in QueryStats::load(db, &[database_id], start, end).await? {
+        for stat in group.decompress()? {
             calls += stat.calls;
         }
     }
@@ -103,22 +103,26 @@ async fn example() {
     // Note: you'll want to choose the time range passed to `delete` so it only groups, for example, stats
     // from the past day into a fewer number of rows. There's a balance to be reached between compression
     // ratio and not slowing down read queries with unwanted data from outside the requested time range.
-    assert_eq!(2, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
-    let mut stats = Vec::new();
-    for group in QueryStats::delete(db, &[database_id], start, end).await.unwrap() {
-        for stat in group.decompress().unwrap() {
-            stats.push(stat);
+    assert_eq!(2, db.query_one("SELECT count(*) FROM query_stats", &[]).await?.get::<_, i64>(0));
+    transaction!(db, {
+        let mut stats = Vec::new();
+        for group in QueryStats::delete(db, &[database_id], start, end).await? {
+            for stat in group.decompress()? {
+                stats.push(stat);
+            }
         }
-    }
-    assert_eq!(0, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
-    QueryStats::store(db, stats).await.unwrap();
-    assert_eq!(1, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
-    let group = QueryStats::load(db, &[database_id], start, end).await.unwrap().remove(0);
+        assert_eq!(0, db.query_one("SELECT count(*) FROM query_stats", &[]).await?.get::<_, i64>(0));
+        QueryStats::store(db, stats).await?;
+    });
+    assert_eq!(1, db.query_one("SELECT count(*) FROM query_stats", &[]).await?.get::<_, i64>(0));
+    let group = QueryStats::load(db, &[database_id], start, end).await?.remove(0);
     assert_eq!(group.start_at, end - Duration::from_secs(120));
     assert_eq!(group.end_at, end - Duration::from_secs(60));
-    let stats = group.decompress().unwrap();
+    let stats = group.decompress()?;
     assert_eq!(stats[0].collected_at, end - Duration::from_secs(120));
     assert_eq!(stats[1].collected_at, end - Duration::from_secs(60));
+
+    Ok(())
 }
 
 use std::str::FromStr;
@@ -130,6 +134,28 @@ pub static DB_POOL: std::sync::LazyLock<std::sync::Arc<deadpool_postgres::Pool>>
     let mgr = deadpool_postgres::Manager::from_config(pg_config, tokio_postgres::NoTls, mgr_config);
     deadpool_postgres::Pool::builder(mgr).build().unwrap().into()
 });
+
+#[macro_export]
+macro_rules! transaction {
+    ($db: ident, $block: expr) => {
+        $db.execute("BEGIN", &[]).await?;
+        let result: anyhow::Result<()> = (|| async {
+            $block
+            Ok(())
+        })().await;
+        match result {
+            Ok(result) => {
+                $db.execute("COMMIT", &[]).await?;
+                result
+            }
+            Err(err) => {
+                $db.execute("ROLLBACK", &[]).await?;
+                anyhow::bail!(err);
+            }
+        }
+    }
+}
+pub use transaction;
 ```
 
 Additional examples can be found in [tests/tests.rs](tests/tests.rs).
@@ -140,3 +166,4 @@ Additional examples can be found in [tests/tests.rs](tests/tests.rs).
 - support other storage models (filesystem, S3, etc)
 - support compression for other data types (text, enums, etc)
 - add a stream/generator API to avoid allocating Vecs when loading data
+- [add `copy_in` support to deadpool_postgres and tokio_postgres `GenericClient`](https://github.com/deadpool-rs/deadpool/issues/397)
