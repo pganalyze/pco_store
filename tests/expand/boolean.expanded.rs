@@ -28,13 +28,12 @@ impl QueryStats {
             });
         }
         let sql = ::alloc::__export::must_use({
-            let res = ::alloc::fmt::format(
+            ::alloc::fmt::format(
                 format_args!(
                     "SELECT * FROM {0} WHERE {1}", "query_stats",
                     "database_id = ANY($1)",
                 ),
-            );
-            res
+            )
         });
         let mut results = Vec::new();
         for row in db.query(&db.prepare_cached(&sql).await?, &[&database_id]).await? {
@@ -65,13 +64,12 @@ impl QueryStats {
             });
         }
         let sql = ::alloc::__export::must_use({
-            let res = ::alloc::fmt::format(
+            ::alloc::fmt::format(
                 format_args!(
                     "DELETE FROM {0} WHERE {1} RETURNING *", "query_stats",
                     "database_id = ANY($1)",
                 ),
-            );
-            res
+            )
         });
         let mut results = Vec::new();
         for row in db.query(&db.prepare_cached(&sql).await?, &[&database_id]).await? {
@@ -123,13 +121,12 @@ impl QueryStats {
             grouped_rows.entry((row.database_id,)).or_default().push(row);
         }
         let sql = ::alloc::__export::must_use({
-            let res = ::alloc::fmt::format(
+            ::alloc::fmt::format(
                 format_args!(
                     "COPY {0} ({1}) FROM STDIN BINARY", "query_stats",
                     "database_id, toplevel, calls",
                 ),
-            );
-            res
+            )
         });
         let types = &[
             tokio_postgres::types::Type::INT8,
