@@ -4,6 +4,28 @@ use quote::quote;
 use syn::parse::{Parse, ParseStream};
 use syn::{Ident, ItemStruct, Lit, Result, Token, Type, bracketed, parse_macro_input};
 
+#[macro_export]
+macro_rules! transaction {
+    ($db: ident, $block: expr) => {
+        $db.execute("BEGIN", &[]).await?;
+        let result: anyhow::Result<()> = (|| async {
+            $block
+            Ok(())
+        })().await;
+        match result {
+            Ok(result) => {
+                $db.execute("COMMIT", &[]).await?;
+                result
+            }
+            Err(err) => {
+                $db.execute("ROLLBACK", &[]).await?;
+                anyhow::bail!(err);
+            }
+        }
+    }
+}
+pub use transaction;
+
 struct Arguments {
     timestamp: Option<Ident>,
     group_by: Vec<Ident>,
@@ -73,6 +95,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
     // load and delete
     let mut fields = Vec::new();
     let mut load_filters = Vec::new();
+    let mut load_filter_names = Vec::new();
     let mut load_checks = Vec::new();
     let mut load_where = Vec::new();
     let mut load_params = Vec::new();
@@ -85,6 +108,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
         if group_by.iter().any(|i| *i == ident) {
             fields.push(quote! { pub #ident: #ty, });
             load_filters.push(quote! { #ident: &[#ty], });
+            load_filter_names.push(quote! { #ident, });
             let name = format!("{ident}");
             load_checks.push(quote! {
                 if #ident.is_empty() {
@@ -126,11 +150,13 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
             filter_start: SystemTime,
             filter_end: SystemTime,
         });
+        load_filter_names.push(quote! { filter_start, filter_end, });
         load_fields.push(quote! { filter: true, filter_start, filter_end, });
         delete_fields.push(quote! { filter: false, filter_start, filter_end, });
     }
     let fields = tokens(fields);
     let load_filters = tokens(load_filters);
+    let load_filter_names = tokens(load_filter_names);
     let load_checks = tokens(load_checks);
     let load_where = if load_where.is_empty() { "true".to_string() } else { load_where.join(" AND ") };
     let load_params = tokens(load_params);
@@ -294,6 +320,23 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
                     results.push(#packed_name { #delete_fields });
                 }
                 Ok(results)
+            }
+
+            /// Improves the compression ratio by deleting multiple rows and re-inserting the data into fewer rows.
+            ///
+            /// There's a balance to be reached between improving the compression ratio and forcing future read
+            /// queries to load a lot of unwanted data. The exact threshold will depend on the volume of data,
+            /// but 50 thousand rows per group may be a good goal.
+            pub async fn compact(db: &deadpool_postgres::Object, #load_filters) -> anyhow::Result<()> {
+                pco_store::transaction!(db, {
+                    let mut rows = Vec::new();
+                    for group in Self::delete(db, #load_filter_names).await? {
+                        for row in group.decompress()? {
+                            rows.push(row);
+                        }
+                    }
+                    Self::store(db, rows).await?;
+                });
             }
 
             /// Decompresses a group of data points.

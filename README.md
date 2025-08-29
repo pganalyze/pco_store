@@ -98,29 +98,14 @@ async fn example() -> anyhow::Result<()> {
     }
     assert_eq!(calls, 2);
 
-    // Delete and re-group to improve compression ratio
+    // Improves the compression ratio by deleting and re-inserting the data into fewer rows.
     //
-    // Note: you'll want to choose the time range passed to `delete` so it only groups, for example, stats
-    // from the past day into a fewer number of rows. There's a balance to be reached between compression
-    // ratio and not slowing down read queries with unwanted data from outside the requested time range.
+    // There's a balance to be reached between improving the compression ratio and forcing future read
+    // queries to load a lot of unwanted data. The exact threshold will depend on the volume of data,
+    // but 50 thousand rows per group may be a good goal.
     assert_eq!(2, db.query_one("SELECT count(*) FROM query_stats", &[]).await?.get::<_, i64>(0));
-    transaction!(db, {
-        let mut stats = Vec::new();
-        for group in QueryStats::delete(db, &[database_id], start, end).await? {
-            for stat in group.decompress()? {
-                stats.push(stat);
-            }
-        }
-        assert_eq!(0, db.query_one("SELECT count(*) FROM query_stats", &[]).await?.get::<_, i64>(0));
-        QueryStats::store(db, stats).await?;
-    });
+    QueryStats::compact(db, &[database_id], start, end).await?
     assert_eq!(1, db.query_one("SELECT count(*) FROM query_stats", &[]).await?.get::<_, i64>(0));
-    let group = QueryStats::load(db, &[database_id], start, end).await?.remove(0);
-    assert_eq!(group.start_at, end - Duration::from_secs(120));
-    assert_eq!(group.end_at, end - Duration::from_secs(60));
-    let stats = group.decompress()?;
-    assert_eq!(stats[0].collected_at, end - Duration::from_secs(120));
-    assert_eq!(stats[1].collected_at, end - Duration::from_secs(60));
 
     Ok(())
 }
@@ -134,28 +119,6 @@ pub static DB_POOL: std::sync::LazyLock<std::sync::Arc<deadpool_postgres::Pool>>
     let mgr = deadpool_postgres::Manager::from_config(pg_config, tokio_postgres::NoTls, mgr_config);
     deadpool_postgres::Pool::builder(mgr).build().unwrap().into()
 });
-
-#[macro_export]
-macro_rules! transaction {
-    ($db: ident, $block: expr) => {
-        $db.execute("BEGIN", &[]).await?;
-        let result: anyhow::Result<()> = (|| async {
-            $block
-            Ok(())
-        })().await;
-        match result {
-            Ok(result) => {
-                $db.execute("COMMIT", &[]).await?;
-                result
-            }
-            Err(err) => {
-                $db.execute("ROLLBACK", &[]).await?;
-                anyhow::bail!(err);
-            }
-        }
-    }
-}
-pub use transaction;
 ```
 
 Additional examples can be found in [tests/tests.rs](tests/tests.rs).
