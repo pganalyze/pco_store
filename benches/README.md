@@ -10,15 +10,15 @@ Size is listed in megabytes, and times are listed in seconds.
 
 ### `bucket_size.rs`
 
-Re-grouping the data from 10 minute buckets to 24 hour buckets improves the compression ratio and read/write time. Hopefully the time spent on small buckets can be improved in future upstream changes to pco.
+Compacting the data from 10 minute buckets to 24 hour buckets improves the compression ratio and read/write time.
 
 The ideal bucket size will depend on your workload. A larger bucket results in better compression, but means more unwanted data has to be loaded and discarded at read time.
 
-|                                    | Size | Write time | Read time | Average group size |
-| ---------------------------------- | ---- | ---------- | --------- | ------------------ |
-| 1 day bucket (pco)                 | 217  | 18.5       | 2.1       | 28,433             |
-| 10 minute bucket (pco)             | 318  | 31.5       | 8.2       | 214                |
-| 10 minute bucket (Postgres arrays) | 485  |            |           | 214                |
+|                                    | Size | Write time | Read time | Average bucket size |
+| ---------------------------------- | ---- | ---------- | --------- | ------------------- |
+| 1 day bucket (pco)                 | 217  | 18.5       | 2.0       | 28,433              |
+| 10 minute bucket (pco)             | 318  | 30.7       | 4.5       | 214                 |
+| 10 minute bucket (Postgres arrays) | 485  |            |           | 214                 |
 
 ### `float.rs`
 
@@ -28,13 +28,13 @@ Reducing the float precision to 2 decimal points reduces the size by 29% (217 MB
 
 |                                           | Size | Write time | Read time |
 | ----------------------------------------- | ---- | ---------- | --------- |
-| `bucket_size.rs` baseline: full precision | 217  | 18.5       | 2.1       |
-| rounded to 0 decimals                     | 107  | 17.4       | 2.1       |
-| rounded to 1 decimal                      | 131  | 18.6       | 2.2       |
-| rounded to 2 decimals                     | 155  | 19.3       | 2.2       |
-| multiplied by 1 and casted to integer     | 89   | 15.9       | 2.1       |
-| multiplied by 10 and casted to integer    | 97   | 16.1       | 2.1       |
-| multiplied by 100 and casted to integer   | 107  | 16.5       | 2.1       |
+| `bucket_size.rs` winner (as baseline)     | 217  | 18.5       | 2.0       |
+| rounded to 0 decimals                     | 106  | 15.8       | 1.9       |
+| rounded to 1 decimal                      | 132  | 16.6       | 1.8       |
+| rounded to 2 decimals                     | 155  | 17.7       | 1.8       |
+| multiplied by 1 and casted to integer     | 89   | 14.5       | 1.8       |
+| multiplied by 10 and casted to integer    | 97   | 14.7       | 1.7       |
+| multiplied by 100 and casted to integer   | 107  | 15.0       | 1.6       |
 
 ## Overall results
 
@@ -44,15 +44,9 @@ Now with the optimized data model, this benchmark compares the performance of us
 
 |                 | Size | Write time | Read time | Compression method |
 | --------------- | ---- | ---------- | --------- | ------------------ |
-| pco             | 107  | 15.6       | 1.9       | pco                |
-| pco_store       | 107  | 17.3       | 2.0       | pco                |
-| Postgres arrays | 207  | 84.0       | 10.7      | Postgres pglz      |
-
-There are other numeric compression libraries available in Rust, but they've been disqualified from this comparison because of their limited data type support. In tests not included in this repo, none of these crates outperformed pco even when using the limited set of data types available.
-
-- [stream-vbyte](https://crates.io/crates/stream-vbyte): doesn't support `i64` or floats
-- [bitpacking](https://crates.io/crates/bitpacking): doesn't support `i64` or floats
-- [tsz-compress](https://crates.io/crates/tsz-compress): doesn't support floats
+| pco             | 107  | 14.8       | 1.6       | pco                |
+| pco_store       | 107  | 15.8       | 1.7       | pco                |
+| Postgres arrays | 207  | 82.7       | 10.2      | Postgres pglz      |
 
 ## Others
 
@@ -61,6 +55,14 @@ There are other numeric compression libraries available in Rust, but they've bee
 The standard library `SystemTime` is being used depsite [chrono's](https://crates.io/crates/chrono) more feature-complete API because adding durations to a timestamp (in `decompress`) is noticeably slower when using chrono.
 
 TODO: write this benchmark
+
+## Disqualified crates
+
+These crates don't support necessary data types, and in local tests they didn't outperform pco anyway:
+
+- [stream-vbyte](https://crates.io/crates/stream-vbyte): doesn't support `i64` or floats
+- [bitpacking](https://crates.io/crates/bitpacking): doesn't support `i64` or floats
+- [tsz-compress](https://crates.io/crates/tsz-compress): doesn't support floats
 
 # Setup
 

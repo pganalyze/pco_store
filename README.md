@@ -12,13 +12,13 @@ To see the generated code, look in [tests/expand](tests/expand) or run `cargo ex
 ## Supported data types
 
 - pco supports `u16`, `u32`, `u64`, `i16`, `i32`, `i64`, `f16`, `f32`, `f64`
-- pco_store additionally supports `SystemTime`, `bool`
+- pco_store adds support for `SystemTime`, `bool`
 
 ## Performance
 
-Numeric compression algorithms take advantage of the mathematic relationships between a series of numbers to compress them to a higher degree than binary compression is able to. Of the numeric compression algorithms available in Rust, pco achieves both the best compression ratio and the best round-trip write and read time.
+Numeric compression algorithms take advantage of the mathematic relationships between a series of numbers to compress them to a higher degree than binary compression can. Of the numeric compression algorithms available in Rust, pco achieves both the best compression ratio and the best round-trip read and write time.
 
-Compared to native Postgres arrays using binary compression, pco_store improves the compression ratio by 2x and improves read and write time by 5x in the included [benchmarks](benches). Better compression ratios can be expected with larger datasets.
+Compared to Postgres array data types, pco_store improves the compression ratio by 2x and improves read and write time by 5x in the included [benchmarks](benches). Better compression ratios can be expected with larger datasets.
 
 ## Usage
 
