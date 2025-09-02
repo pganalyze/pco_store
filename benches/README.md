@@ -56,14 +56,6 @@ The standard library `SystemTime` is being used depsite [chrono's](https://crate
 
 TODO: write this benchmark
 
-## Disqualified crates
-
-These crates don't support necessary data types, and in local tests they didn't outperform pco anyway:
-
-- [stream-vbyte](https://crates.io/crates/stream-vbyte): doesn't support `i64` or floats
-- [bitpacking](https://crates.io/crates/bitpacking): doesn't support `i64` or floats
-- [tsz-compress](https://crates.io/crates/tsz-compress): doesn't support floats
-
 # Setup
 
 First install [git-lfs](https://docs.github.com/en/repositories/working-with-files/managing-large-files/installing-git-large-file-storage), then build the `query_stats` table from the compressed backup file:

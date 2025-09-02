@@ -167,3 +167,17 @@ Additional examples can be found in [tests/tests.rs](tests/tests.rs).
 - support compression for other data types (text, enums, etc)
 - add a stream/generator API to avoid allocating Vecs when loading data
 - [add `copy_in` support to deadpool_postgres and tokio_postgres `GenericClient`](https://github.com/deadpool-rs/deadpool/issues/397)
+
+## Other crates
+
+These crates also implement numeric compression:
+
+|                | Maintained? | Data type support        |
+| -------------- | ----------- | ------------------------ |
+| [stream-vbyte] | No          | Missing `i64` and floats |
+| [bitpacking]   | No          | Missing `i64` and floats |
+| [tsz-compress] | No          | Missing floats           |
+
+[stream-vbyte]: https://crates.io/crates/stream-vbyte
+[bitpacking]: https://crates.io/crates/bitpacking
+[tsz-compress]: https://crates.io/crates/tsz-compress
