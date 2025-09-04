@@ -54,7 +54,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
     let model = parse_macro_input!(i as ItemStruct);
     let item = proc_macro2::TokenStream::from(item);
     let name = model.ident.clone();
-    let packed_name = Ident::new(&(model.ident.to_string() + "s"), Span::call_site());
+    let packed_name = Ident::new(&format!("Compressed{}s", model.ident), Span::call_site());
 
     let table_name = if let Some(table_name) = table_name {
         table_name.to_string()
