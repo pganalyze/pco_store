@@ -54,14 +54,14 @@ async fn timestamp() {
     // Write
     let collected_at = end - Duration::from_secs(120);
     let stats = vec![QueryStat { database_id, collected_at, fingerprint: 1, calls: 1, total_time: 1.0 }];
-    QueryStats::store(db, stats).await.unwrap();
+    CompressedQueryStats::store(db, stats).await.unwrap();
     let collected_at = end - Duration::from_secs(60);
     let stats = vec![QueryStat { database_id, collected_at, fingerprint: 1, calls: 1, total_time: 1.0 }];
-    QueryStats::store(db, stats).await.unwrap();
+    CompressedQueryStats::store(db, stats).await.unwrap();
 
     // Read
     let mut calls = 0;
-    for group in QueryStats::load(db, &[database_id], start, end).await.unwrap() {
+    for group in CompressedQueryStats::load(db, &[database_id], start, end).await.unwrap() {
         for stat in group.decompress().unwrap() {
             calls += stat.calls;
         }
@@ -71,15 +71,15 @@ async fn timestamp() {
     // Delete and re-group
     assert_eq!(2, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
     let mut stats = Vec::new();
-    for group in QueryStats::delete(db, &[database_id], start, end).await.unwrap() {
+    for group in CompressedQueryStats::delete(db, &[database_id], start, end).await.unwrap() {
         for stat in group.decompress().unwrap() {
             stats.push(stat);
         }
     }
     assert_eq!(0, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
-    QueryStats::store(db, stats).await.unwrap();
+    CompressedQueryStats::store(db, stats).await.unwrap();
     assert_eq!(1, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
-    let group = QueryStats::load(db, &[database_id], start, end).await.unwrap().remove(0);
+    let group = CompressedQueryStats::load(db, &[database_id], start, end).await.unwrap().remove(0);
     assert_eq!(group.start_at, end - Duration::from_secs(120));
     assert_eq!(group.end_at, end - Duration::from_secs(60));
     let stats = group.decompress().unwrap();
@@ -95,11 +95,11 @@ async fn timestamp() {
             stat.collected_at += Duration::from_secs(60);
             stats.push(stat.clone());
         }
-        QueryStats::store(db, stats).await.unwrap();
+        CompressedQueryStats::store(db, stats).await.unwrap();
     }
     let start = start + Duration::from_secs(3 * 60); // minute 3, skipping the first 2 minutes in the group
     let end = start + Duration::from_secs(23 * 60); // minute 26, skipping the last 4 minutes in the group
-    let groups = QueryStats::load(db, &[database_id], start, end).await.unwrap();
+    let groups = CompressedQueryStats::load(db, &[database_id], start, end).await.unwrap();
     assert_eq!(3, groups.len());
     let (mut calls, mut min, mut max) = (0, SystemTime::now(), SystemTime::UNIX_EPOCH);
     for group in groups {
@@ -128,8 +128,8 @@ async fn timestamp() {
         }
         let end = end + Duration::from_secs(5 * 60); // minute 31
         let stat = QueryStat { database_id, collected_at: end, fingerprint: 1, calls: 1, total_time: 1.0, new_col: 1 };
-        QueryStats::store(db, vec![stat]).await.unwrap();
-        let groups = QueryStats::load(db, &[database_id], start, end).await.unwrap();
+        CompressedQueryStats::store(db, vec![stat]).await.unwrap();
+        let groups = CompressedQueryStats::load(db, &[database_id], start, end).await.unwrap();
         assert_eq!(4, groups.len());
         let (mut calls, mut new_col, mut min, mut max) = (0, 0, SystemTime::now(), SystemTime::UNIX_EPOCH);
         for group in groups {
@@ -186,14 +186,14 @@ async fn aggregate() {
     let granularity = 60;
     let collected_at = start + Duration::from_secs(10);
     let stats = vec![QueryStat { database_id, granularity, collected_at, fingerprint: 1, calls: 1, total_time: 1.0 }];
-    QueryStats::store(db, stats).await.unwrap();
+    CompressedQueryStats::store(db, stats).await.unwrap();
     let collected_at = start + Duration::from_secs(20);
     let stats = vec![QueryStat { database_id, granularity, collected_at, fingerprint: 1, calls: 1, total_time: 1.0 }];
-    QueryStats::store(db, stats).await.unwrap();
+    CompressedQueryStats::store(db, stats).await.unwrap();
 
     // Read
     let mut calls = 0;
-    for group in QueryStats::load(db, &[database_id], &[granularity], start, end).await.unwrap() {
+    for group in CompressedQueryStats::load(db, &[database_id], &[granularity], start, end).await.unwrap() {
         for stat in group.decompress().unwrap() {
             calls += stat.calls;
         }
@@ -205,7 +205,7 @@ async fn aggregate() {
     let mut stats: HashMap<_, QueryStat> = HashMap::new();
     let start: SystemTime = DateTime::<Utc>::from(end - Duration::from_secs(3600)).duration_trunc(chrono::Duration::hours(1)).unwrap().into();
     let end = start + Duration::from_secs(3600);
-    for group in QueryStats::load(db, &[database_id], &[60], start, end).await.unwrap() {
+    for group in CompressedQueryStats::load(db, &[database_id], &[60], start, end).await.unwrap() {
         for stat in group.decompress().unwrap() {
             match stats.entry((stat.database_id, stat.fingerprint)) {
                 Entry::Occupied(mut entry) => {
@@ -223,9 +223,9 @@ async fn aggregate() {
     }
     let stats: Vec<QueryStat> = stats.into_values().collect();
     assert_eq!(2, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
-    QueryStats::store(db, stats).await.unwrap();
+    CompressedQueryStats::store(db, stats).await.unwrap();
     assert_eq!(3, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
-    let group = QueryStats::load(db, &[database_id], &[3600], start, end).await.unwrap().remove(0);
+    let group = CompressedQueryStats::load(db, &[database_id], &[3600], start, end).await.unwrap().remove(0);
     assert_eq!(group.start_at, start);
     assert_eq!(group.end_at, start);
     let stats = group.decompress().unwrap();
@@ -257,13 +257,13 @@ async fn no_timestamp() {
 
     // Write
     let stats = vec![QueryStat { database_id, calls: 1, total_time: 1.0 }];
-    QueryStats::store(db, stats).await.unwrap();
+    CompressedQueryStats::store(db, stats).await.unwrap();
     let stats = vec![QueryStat { database_id, calls: 2, total_time: 2.0 }];
-    QueryStats::store(db, stats).await.unwrap();
+    CompressedQueryStats::store(db, stats).await.unwrap();
 
     // Read
     let mut calls = 0;
-    for group in QueryStats::load(db, &[database_id]).await.unwrap() {
+    for group in CompressedQueryStats::load(db, &[database_id]).await.unwrap() {
         for stat in group.decompress().unwrap() {
             calls += stat.calls;
         }
@@ -273,15 +273,15 @@ async fn no_timestamp() {
     // Delete and re-group
     assert_eq!(2, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
     let mut stats = Vec::new();
-    for group in QueryStats::delete(db, &[database_id]).await.unwrap() {
+    for group in CompressedQueryStats::delete(db, &[database_id]).await.unwrap() {
         for stat in group.decompress().unwrap() {
             stats.push(stat);
         }
     }
     assert_eq!(0, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
-    QueryStats::store(db, stats).await.unwrap();
+    CompressedQueryStats::store(db, stats).await.unwrap();
     assert_eq!(1, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
-    let group = QueryStats::load(db, &[database_id]).await.unwrap().remove(0);
+    let group = CompressedQueryStats::load(db, &[database_id]).await.unwrap().remove(0);
     let stats = group.decompress().unwrap();
     assert_eq!(stats[0].calls, 1);
     assert_eq!(stats[1].calls, 2);
@@ -310,13 +310,13 @@ async fn no_group_by() {
 
     // Write
     let stats = vec![QueryStat { database_id, calls: 1, total_time: 1.0 }];
-    QueryStats::store(db, stats).await.unwrap();
+    CompressedQueryStats::store(db, stats).await.unwrap();
     let stats = vec![QueryStat { database_id, calls: 2, total_time: 2.0 }];
-    QueryStats::store(db, stats).await.unwrap();
+    CompressedQueryStats::store(db, stats).await.unwrap();
 
     // Read
     let mut calls = 0;
-    for group in QueryStats::load(db).await.unwrap() {
+    for group in CompressedQueryStats::load(db).await.unwrap() {
         for stat in group.decompress().unwrap() {
             calls += stat.calls;
         }
@@ -326,15 +326,15 @@ async fn no_group_by() {
     // Delete and re-group
     assert_eq!(2, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
     let mut stats = Vec::new();
-    for group in QueryStats::delete(db).await.unwrap() {
+    for group in CompressedQueryStats::delete(db).await.unwrap() {
         for stat in group.decompress().unwrap() {
             stats.push(stat);
         }
     }
     assert_eq!(0, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
-    QueryStats::store(db, stats).await.unwrap();
+    CompressedQueryStats::store(db, stats).await.unwrap();
     assert_eq!(1, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
-    let group = QueryStats::load(db).await.unwrap().remove(0);
+    let group = CompressedQueryStats::load(db).await.unwrap().remove(0);
     let stats = group.decompress().unwrap();
     assert_eq!(stats[0].calls, 1);
     assert_eq!(stats[1].calls, 2);
@@ -363,13 +363,13 @@ async fn table_name() {
 
     // Write
     let stats = vec![QueryStat { database_id, calls: 1, total_time: 1.0 }];
-    QueryStats::store(db, stats).await.unwrap();
+    CompressedQueryStats::store(db, stats).await.unwrap();
     let stats = vec![QueryStat { database_id, calls: 2, total_time: 2.0 }];
-    QueryStats::store(db, stats).await.unwrap();
+    CompressedQueryStats::store(db, stats).await.unwrap();
 
     // Read
     let mut calls = 0;
-    for group in QueryStats::load(db).await.unwrap() {
+    for group in CompressedQueryStats::load(db).await.unwrap() {
         for stat in group.decompress().unwrap() {
             calls += stat.calls;
         }
@@ -400,13 +400,13 @@ async fn float_round() {
 
     // Write
     let stats = vec![QueryStat { database_id, calls: 1, total_time: 1.2345 }];
-    QueryStats::store(db, stats).await.unwrap();
+    CompressedQueryStats::store(db, stats).await.unwrap();
     let stats = vec![QueryStat { database_id, calls: 2, total_time: 1.2345 }];
-    QueryStats::store(db, stats).await.unwrap();
+    CompressedQueryStats::store(db, stats).await.unwrap();
 
     // Read
     let mut total_time = 0.0;
-    for group in QueryStats::load(db, &[database_id]).await.unwrap() {
+    for group in CompressedQueryStats::load(db, &[database_id]).await.unwrap() {
         for stat in group.decompress().unwrap() {
             total_time += stat.total_time;
         }
@@ -435,13 +435,13 @@ async fn float_round() {
 
         // Write
         let stats = vec![QueryStat { database_id, calls: 1, total_time: 1.2345 }];
-        QueryStats::store(db, stats).await.unwrap();
+        CompressedQueryStats::store(db, stats).await.unwrap();
         let stats = vec![QueryStat { database_id, calls: 2, total_time: 1.2345 }];
-        QueryStats::store(db, stats).await.unwrap();
+        CompressedQueryStats::store(db, stats).await.unwrap();
 
         // Read
         let mut total_time = 0.0;
-        for group in QueryStats::load(db, &[database_id]).await.unwrap() {
+        for group in CompressedQueryStats::load(db, &[database_id]).await.unwrap() {
             for stat in group.decompress().unwrap() {
                 total_time += stat.total_time;
             }
@@ -475,9 +475,9 @@ async fn boolean() {
 
     // Write
     let stats = vec![QueryStat { database_id, calls: 1, toplevel: true }, QueryStat { database_id, calls: 2, toplevel: false }];
-    QueryStats::store(db, stats.clone()).await.unwrap();
+    CompressedQueryStats::store(db, stats.clone()).await.unwrap();
 
     // Read
-    let group = QueryStats::load(db, &[database_id]).await.unwrap().remove(0);
+    let group = CompressedQueryStats::load(db, &[database_id]).await.unwrap().remove(0);
     assert_eq!(stats, group.decompress().unwrap());
 }

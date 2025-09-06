@@ -80,7 +80,7 @@ pub async fn store() -> Result<()> {
                     });
                 }
             }
-            QueryStats::store(db, stats).await?;
+            CompressedQueryStats::store(db, stats).await?;
         }
     }
     Ok(())
@@ -90,7 +90,7 @@ pub async fn load() -> Result<()> {
     let db = &DB_POOL.get().await.unwrap();
     let database_ids: Vec<i64> = db.query_one("SELECT array_agg(DISTINCT database_id) FROM comparison_pco_stores", &[]).await?.get(0);
     let mut stats = Vec::new();
-    for group in QueryStats::load(db, &database_ids, SystemTime::UNIX_EPOCH, SystemTime::now()).await? {
+    for group in CompressedQueryStats::load(db, &database_ids, SystemTime::UNIX_EPOCH, SystemTime::now()).await? {
         for stat in group.decompress()? {
             stats.push(stat);
         }

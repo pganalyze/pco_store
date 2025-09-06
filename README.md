@@ -85,13 +85,13 @@ async fn example() -> anyhow::Result<()> {
 
     // Write
     let stats = vec![QueryStat { database_id, collected_at: end - Duration::from_secs(120), fingerprint: 1, calls: 1, total_time: 1.0 }];
-    QueryStats::store(db, stats).await?;
+    CompressedQueryStats::store(db, stats).await?;
     let stats = vec![QueryStat { database_id, collected_at: end - Duration::from_secs(60), fingerprint: 1, calls: 1, total_time: 1.0 }];
-    QueryStats::store(db, stats).await?;
+    CompressedQueryStats::store(db, stats).await?;
 
     // Read
     let mut calls = 0;
-    for group in QueryStats::load(db, &[database_id], start, end).await? {
+    for group in CompressedQueryStats::load(db, &[database_id], start, end).await? {
         for stat in group.decompress()? {
             calls += stat.calls;
         }
@@ -106,16 +106,16 @@ async fn example() -> anyhow::Result<()> {
     assert_eq!(2, db.query_one("SELECT count(*) FROM query_stats", &[]).await?.get::<_, i64>(0));
     transaction!(db, {
         let mut stats = Vec::new();
-        for group in QueryStats::delete(db, &[database_id], start, end).await? {
+        for group in CompressedQueryStats::delete(db, &[database_id], start, end).await? {
             for stat in group.decompress()? {
                 stats.push(stat);
             }
         }
         assert_eq!(0, db.query_one("SELECT count(*) FROM query_stats", &[]).await?.get::<_, i64>(0));
-        QueryStats::store(db, stats).await?;
+        CompressedQueryStats::store(db, stats).await?;
     });
     assert_eq!(1, db.query_one("SELECT count(*) FROM query_stats", &[]).await?.get::<_, i64>(0));
-    let group = QueryStats::load(db, &[database_id], start, end).await?.remove(0);
+    let group = CompressedQueryStats::load(db, &[database_id], start, end).await?.remove(0);
     assert_eq!(group.start_at, end - Duration::from_secs(120));
     assert_eq!(group.end_at, end - Duration::from_secs(60));
     let stats = group.decompress()?;
