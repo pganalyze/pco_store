@@ -12,22 +12,22 @@ To see the generated code, look in [tests/expand](tests/expand) or run `cargo ex
 ## Supported data types
 
 - pco supports `u16`, `u32`, `u64`, `i16`, `i32`, `i64`, `f16`, `f32`, `f64`
-- pco_store adds support for `SystemTime`, `bool`
+- pco_store adds support for `SystemTime` (mapped to ???), `bool` (mapped to ???)
 
 ## Performance
 
-Numeric compression algorithms take advantage of the mathematic relationships between a series of numbers to compress them to a higher degree than binary compression can. Of the numeric compression algorithms available in Rust, pco achieves both the best compression ratio and the best round-trip read and write time.
+Numeric compression algorithms take advantage of the mathematic relationships between a series of numbers to compress them to a higher degree than binary compression can. Of the numeric compression algorithms available in Rust, in our tests pco achieves both the best compression ratio and the best round-trip read and write time.
 
-Compared to Postgres array data types, pco_store improves the compression ratio by 2x and improves read and write time by 5x in the included [benchmarks](benches). Better compression ratios can be expected with larger datasets.
+Compared to Postgres array data types compressed with pglz, pco_store improves the compression ratio by 2x and improves read and write time by 5x in the included [benchmarks](benches). Better compression ratios can be expected with larger datasets.
 
 ## Usage
 
 The `pco_store::store` procedural macro accepts these arguments:
 
-- `timestamp` accepts the field name for a timestamp in the struct. Timestamps are internally stored as an `i64` microsecond offset from the Unix epoch. This adds `start_at` and `end_at` timestamp columns to the resulting table. A composite index should cover `start_at` and `end_at`.
-- `group_by` accepts one or more field names that are stored as uncompressed fields on the Postgres table that all other fields are grouped by. The fields are added as `load` filters, and `store` automatically groups the input data by them. A composite index should cover these fields.
-- `float_round` sets the number of fractional decimal points to retain for float values. This helps improve the compression ratio when you don't need the full precision of the source data. Internally this stores the values as `i64`, with the fractional precision retained by multiplying by 10^N at write time, and then at read time casting to float and dividing by 10^N. Users should confirm that the generated integer values won't overflow past `i64::MAX`.
-- `table_name` overrides the Postgres table name. By default it underscores and pluralizes the struct name, so `QueryStat` becomes `query_stats`.
+- `timestamp` accepts the field name for a timestamp in the struct. Timestamps are internally stored as an `i64` microsecond offset from the Unix epoch. This requires `start_at` and `end_at` timestamp columns on the underlying table. A composite index should cover `start_at` and `end_at`.
+- `group_by` accepts one or more field names that are stored as uncompressed fields on the Postgres table that all other fields are grouped by. The fields are required for `load`, and `store` automatically groups the input data by them. A composite index should cover these fields.
+- `float_round` sets the number of fractional decimal points to retain for float values. This helps improve the compression ratio when you don't need the full precision of the source data. Internally this stores the values as `i64`, with the fractional precision retained by multiplying by 10^N at write time, and then at read time casting to float and dividing by 10^N. Users should confirm that the generated integer values won't overflow past `i64::MAX` (larger values will wrap around and become negative).
+- `table_name` overrides the Postgres table name that is used. By default it underscores and pluralizes the struct name, so `QueryStat` becomes `query_stats`.
 
 Additional notes:
 
@@ -67,9 +67,9 @@ CREATE INDEX ON query_stats USING btree (database_id);
 CREATE INDEX ON query_stats USING btree (end_at, start_at);
 ```
 
-`STORAGE EXTERNAL` is set so that Postgres doesn't try to compress the already-compressed fields
+The pco-compressed columns are expected to typically be in Postgres [TOAST](https://www.postgresql.org/docs/current/storage-toast.html). Using `STORAGE EXTERNAL` is recommended so that Postgres doesn't try to compress the already-compressed fields, speeding up writes.
 
-This uses a `(end_at, start_at)` index because it's more selective than `(start_at, end_at)` for common use cases. For example when loading the last week of stats, the `end_at` filter is what's doing the work to filter out rows.
+Its recommended to index `(end_at, start_at)`, because it's more selective than `(start_at, end_at)` for common use cases. For example when loading the last week of stats, the `end_at` filter is what's doing the work to filter out rows.
 ```sql
 end_at >= now() - interval '7 days' AND start_at <= now()
 ```
@@ -181,3 +181,8 @@ These crates also implement numeric compression:
 [stream-vbyte]: https://crates.io/crates/stream-vbyte
 [bitpacking]: https://crates.io/crates/bitpacking
 [tsz-compress]: https://crates.io/crates/tsz-compress
+
+## License
+
+Licensed under the MIT license, see LICENSE file for details.
+Copyright (c) 2025, Duboce Labs, Inc. (pganalyze) <team@pganalyze.com>
