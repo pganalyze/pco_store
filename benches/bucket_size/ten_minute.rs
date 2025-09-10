@@ -84,7 +84,7 @@ pub async fn store() -> Result<()> {
 pub async fn load() -> Result<()> {
     let db = &DB_POOL.get().await.unwrap();
     let mut stats = Vec::new();
-    for group in QueryStats::load(db).await? {
+    for group in CompressedQueryStats::load(db).await? {
         for stat in group.decompress() {
             stats.push(stat);
         }
@@ -105,7 +105,7 @@ pub async fn load() -> Result<()> {
         pub shared_blks_hit: i64,
         pub shared_blks_read: i64,
     }
-    pub struct QueryStats {
+    pub struct CompressedQueryStats {
         database_id: i64,
         start_at: SystemTime,
         collected_at: Vec<u8>,
@@ -119,7 +119,7 @@ pub async fn load() -> Result<()> {
         shared_blks_hit: Vec<u8>,
         shared_blks_read: Vec<u8>,
     }
-    impl QueryStats {
+    impl CompressedQueryStats {
         pub async fn load(db: &Client) -> Result<Vec<Self>> {
             let sql = "
                 SELECT database_id, start_at, collected_at, collected_secs, fingerprint, postgres_role_id, calls, rows, total_time, io_time, shared_blks_hit, shared_blks_read
@@ -127,7 +127,7 @@ pub async fn load() -> Result<()> {
             ";
             let mut results = Vec::new();
             for row in db.query(&db.prepare_cached(sql).await?, &[]).await? {
-                results.push(QueryStats {
+                results.push(Self {
                     database_id: row.get(0),
                     start_at: row.get(1),
                     collected_at: row.get(2),
