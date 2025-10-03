@@ -27,14 +27,7 @@ impl CompressedQueryStats {
                 error
             });
         }
-        let sql = ::alloc::__export::must_use({
-            ::alloc::fmt::format(
-                format_args!(
-                    "SELECT * FROM {0} WHERE {1}", "query_stats",
-                    "database_id = ANY($1)",
-                ),
-            )
-        });
+        let sql = "SELECT * FROM query_stats WHERE database_id = ANY($1)";
         let mut results = Vec::new();
         for row in db.query(&db.prepare_cached(&sql).await?, &[&database_id]).await? {
             results
@@ -63,14 +56,7 @@ impl CompressedQueryStats {
                 error
             });
         }
-        let sql = ::alloc::__export::must_use({
-            ::alloc::fmt::format(
-                format_args!(
-                    "DELETE FROM {0} WHERE {1} RETURNING *", "query_stats",
-                    "database_id = ANY($1)",
-                ),
-            )
-        });
+        let sql = "DELETE FROM query_stats WHERE database_id = ANY($1) RETURNING *";
         let mut results = Vec::new();
         for row in db.query(&db.prepare_cached(&sql).await?, &[&database_id]).await? {
             results
@@ -121,14 +107,7 @@ impl CompressedQueryStats {
         for row in rows {
             grouped_rows.entry((row.database_id,)).or_default().push(row);
         }
-        let sql = ::alloc::__export::must_use({
-            ::alloc::fmt::format(
-                format_args!(
-                    "COPY {0} ({1}) FROM STDIN BINARY", "query_stats",
-                    "database_id, calls, total_time",
-                ),
-            )
-        });
+        let sql = "COPY query_stats (database_id, calls, total_time) FROM STDIN BINARY";
         let types = &[
             tokio_postgres::types::Type::INT8,
             tokio_postgres::types::Type::BYTEA,
