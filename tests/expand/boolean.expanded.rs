@@ -19,13 +19,9 @@ impl CompressedQueryStats {
         database_id: &[i64],
     ) -> anyhow::Result<Vec<CompressedQueryStats>> {
         if database_id.is_empty() {
-            return ::anyhow::__private::Err({
-                use ::anyhow::__private::kind::*;
-                let error = match "database_id".to_string() + "must be specified" {
-                    error => (&error).anyhow_kind().new(error),
-                };
-                error
-            });
+            return Err(
+                anyhow::Error::msg("database_id".to_string() + "must be specified"),
+            );
         }
         let sql = "SELECT * FROM query_stats WHERE database_id = ANY($1)";
         let mut results = Vec::new();
@@ -48,13 +44,9 @@ impl CompressedQueryStats {
         database_id: &[i64],
     ) -> anyhow::Result<Vec<CompressedQueryStats>> {
         if database_id.is_empty() {
-            return ::anyhow::__private::Err({
-                use ::anyhow::__private::kind::*;
-                let error = match "database_id".to_string() + "must be specified" {
-                    error => (&error).anyhow_kind().new(error),
-                };
-                error
-            });
+            return Err(
+                anyhow::Error::msg("database_id".to_string() + "must be specified"),
+            );
         }
         let sql = "DELETE FROM query_stats WHERE database_id = ANY($1) RETURNING *";
         let mut results = Vec::new();

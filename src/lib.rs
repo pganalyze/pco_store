@@ -88,7 +88,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
             let name = format!("{ident}");
             load_checks.push(quote! {
                 if #ident.is_empty() {
-                    anyhow::bail!(#name.to_string() + "must be specified");
+                    return Err(anyhow::Error::msg(#name.to_string() + "must be specified"));
                 }
             });
             load_where.push(format!("{ident} = ANY(${bind})"));
