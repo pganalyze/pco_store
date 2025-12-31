@@ -1,4 +1,4 @@
-# pco_store development
+# Contributing to `pco_store`
 
 ## Environment Setup
 
