@@ -1,5 +1,5 @@
-use ahash::AHashMap;
 use super::*;
+use ahash::AHashMap;
 
 #[::pco_store::store(timestamp = collected_at, group_by = [database_id], float_round = 2, table_name = comparison_pco_stores)]
 pub struct QueryStat {
