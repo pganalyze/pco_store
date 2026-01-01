@@ -315,7 +315,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
                 if rows.is_empty() {
                     return Ok(());
                 }
-                let mut grouped_rows: std::collections::HashMap<_, Vec<#name>> = std::collections::HashMap::new();
+                let mut grouped_rows: ahash::AHashMap<_, Vec<#name>> = ahash::AHashMap::new();
                 for row in rows {
                     grouped_rows.entry((#store_group)).or_default().push(row);
                 }
