@@ -98,6 +98,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "brunch"
+version = "0.11.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a53ea66308fc6df0cdea9268f1c670f5d2bed94c6742800cd2ac0664b2f98589"
+dependencies = [
+ "dactyl",
+ "unicode-width",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -176,6 +186,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "dactyl"
+version = "0.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3ade8623d8c08069f9532c934feca6c576008e4278ac43fb035412a7721b89f1"
+
+[[package]]
 name = "deadpool"
 version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -225,6 +241,12 @@ dependencies = [
  "crypto-common",
  "subtle",
 ]
+
+[[package]]
+name = "dotenvy"
+version = "0.15.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1aaf95b3e5c8f23aa320147307562d361db0ae0d51242340f558153b4eb2439b"
 
 [[package]]
 name = "dtype_dispatch"
@@ -638,8 +660,10 @@ name = "pco_store"
 version = "0.2.0"
 dependencies = [
  "anyhow",
+ "brunch",
  "chrono",
  "deadpool-postgres",
+ "dotenvy",
  "futures",
  "macrotest",
  "pco",
@@ -1196,6 +1220,12 @@ name = "unicode-properties"
 version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e70f2a8b45122e719eb623c01822704c4e0907e7e426a05927e1a1cfff5b75d0"
+
+[[package]]
+name = "unicode-width"
+version = "0.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b4ac048d71ede7ee76d585517add45da530660ef4390e49b098733c6e897f254"
 
 [[package]]
 name = "version_check"
