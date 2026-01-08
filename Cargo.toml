@@ -13,6 +13,7 @@ repository = "https://github.com/pganalyze/pco_store"
 proc-macro = true
 
 [dependencies]
+ahash = "0.8"
 anyhow = "1.0"
 deadpool-postgres = "0.14"
 futures = "0.3"
