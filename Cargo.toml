@@ -23,6 +23,7 @@ syn = "2.0"
 tokio-postgres = "0.7"
 
 [dev-dependencies]
+ahash = "0.8.12"
 brunch = "0.11.0"
 chrono = "0.4"
 dotenvy = "0.15.7"
@@ -40,4 +41,8 @@ harness = false
 
 [[bench]]
 name = "comparison"
+harness = false
+
+[[bench]]
+name = "grouped_rows"
 harness = false
