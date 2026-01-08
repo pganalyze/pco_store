@@ -18,6 +18,9 @@ mod comparison {
 use comparison::*;
 
 static DB_POOL: std::sync::LazyLock<std::sync::Arc<deadpool_postgres::Pool>> = std::sync::LazyLock::new(|| {
+    if std::path::Path::new(".env").exists() {
+        dotenvy::dotenv().unwrap();
+    }
     let url = std::env::var("DATABASE_URL").unwrap_or("postgresql://localhost:5432/postgres".to_string());
     let pg_config = tokio_postgres::Config::from_str(&url).unwrap();
     let mgr_config = deadpool_postgres::ManagerConfig { recycling_method: deadpool_postgres::RecyclingMethod::Fast };
