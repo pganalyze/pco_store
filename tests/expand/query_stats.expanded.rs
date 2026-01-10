@@ -42,22 +42,11 @@ impl CompressedQueryStats {
         filter_end: SystemTime,
     ) -> anyhow::Result<Vec<CompressedQueryStats>> {
         if database_id.is_empty() {
-            return ::anyhow::__private::Err({
-                use ::anyhow::__private::kind::*;
-                let error = match "database_id".to_string() + "must be specified" {
-                    error => (&error).anyhow_kind().new(error),
-                };
-                error
-            });
+            return Err(
+                anyhow::Error::msg("database_id".to_string() + "must be specified"),
+            );
         }
-        let sql = ::alloc::__export::must_use({
-            ::alloc::fmt::format(
-                format_args!(
-                    "SELECT * FROM {0} WHERE {1}", "query_stats",
-                    "database_id = ANY($1) AND end_at >= $2 AND start_at <= $3",
-                ),
-            )
-        });
+        let sql = "SELECT * FROM query_stats WHERE database_id = ANY($1) AND end_at >= $2 AND start_at <= $3";
         let mut results = Vec::new();
         for row in db
             .query(
@@ -99,22 +88,11 @@ impl CompressedQueryStats {
         filter_end: SystemTime,
     ) -> anyhow::Result<Vec<CompressedQueryStats>> {
         if database_id.is_empty() {
-            return ::anyhow::__private::Err({
-                use ::anyhow::__private::kind::*;
-                let error = match "database_id".to_string() + "must be specified" {
-                    error => (&error).anyhow_kind().new(error),
-                };
-                error
-            });
+            return Err(
+                anyhow::Error::msg("database_id".to_string() + "must be specified"),
+            );
         }
-        let sql = ::alloc::__export::must_use({
-            ::alloc::fmt::format(
-                format_args!(
-                    "DELETE FROM {0} WHERE {1} RETURNING *", "query_stats",
-                    "database_id = ANY($1) AND end_at >= $2 AND start_at <= $3",
-                ),
-            )
-        });
+        let sql = "DELETE FROM query_stats WHERE database_id = ANY($1) AND end_at >= $2 AND start_at <= $3 RETURNING *";
         let mut results = Vec::new();
         for row in db
             .query(
@@ -255,14 +233,7 @@ impl CompressedQueryStats {
         for row in rows {
             grouped_rows.entry((row.database_id,)).or_default().push(row);
         }
-        let sql = ::alloc::__export::must_use({
-            ::alloc::fmt::format(
-                format_args!(
-                    "COPY {0} ({1}) FROM STDIN BINARY", "query_stats",
-                    "database_id, start_at, end_at, collected_at, collected_secs, fingerprint, postgres_role_id, calls, rows, total_time, io_time, shared_blks_hit, shared_blks_read",
-                ),
-            )
-        });
+        let sql = "COPY query_stats (database_id, start_at, end_at, collected_at, collected_secs, fingerprint, postgres_role_id, calls, rows, total_time, io_time, shared_blks_hit, shared_blks_read) FROM STDIN BINARY";
         let types = &[
             tokio_postgres::types::Type::INT8,
             tokio_postgres::types::Type::TIMESTAMPTZ,

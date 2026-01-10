@@ -88,7 +88,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
             let name = format!("{ident}");
             load_checks.push(quote! {
                 if #ident.is_empty() {
-                    anyhow::bail!(#name.to_string() + "must be specified");
+                    return Err(anyhow::Error::msg(#name.to_string() + "must be specified"));
                 }
             });
             load_where.push(format!("{ident} = ANY(${bind})"));
@@ -136,6 +136,8 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
     let load_params = tokens(load_params);
     let load_fields = tokens(load_fields);
     let delete_fields = tokens(delete_fields);
+    let load_sql = format!("SELECT * FROM {table_name} WHERE {load_where}");
+    let delete_sql = format!("DELETE FROM {table_name} WHERE {load_where} RETURNING *");
 
     // decompress
     let mut decompress_fields = Vec::new();
@@ -258,6 +260,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
     } else {
         quote! {}
     };
+    let store_sql = format!("COPY {table_name} ({store_fields}) FROM STDIN BINARY");
 
     quote! {
         #item
@@ -274,7 +277,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
             /// rows outside the requested time range.
             pub async fn load(db: &deadpool_postgres::Object, #load_filters) -> anyhow::Result<Vec<#packed_name>> {
                 #load_checks
-                let sql = format!("SELECT * FROM {} WHERE {}", #table_name, #load_where);
+                let sql = #load_sql;
                 let mut results = Vec::new();
                 for row in db.query(&db.prepare_cached(&sql).await?, &[#load_params]).await? {
                     results.push(#packed_name { #load_fields });
@@ -288,7 +291,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
             /// rows outside the requested time range.
             pub async fn delete(db: &deadpool_postgres::Object, #load_filters) -> anyhow::Result<Vec<#packed_name>> {
                 #load_checks
-                let sql = format!("DELETE FROM {} WHERE {} RETURNING *", #table_name, #load_where);
+                let sql = #delete_sql;
                 let mut results = Vec::new();
                 for row in db.query(&db.prepare_cached(&sql).await?, &[#load_params]).await? {
                     results.push(#packed_name { #delete_fields });
@@ -319,7 +322,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
                 for row in rows {
                     grouped_rows.entry((#store_group)).or_default().push(row);
                 }
-                let sql = format!("COPY {} ({}) FROM STDIN BINARY", #table_name, #store_fields);
+                let sql = #store_sql;
                 let types = &[#store_types];
                 let stmt = db.copy_in(&db.prepare_cached(&sql).await?).await?;
                 let writer = tokio_postgres::binary_copy::BinaryCopyInWriter::new(stmt, types);
