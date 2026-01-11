@@ -1,9 +1,9 @@
 #![allow(dead_code)]
 
+use ahash::AHashMap;
 use anyhow::Result;
 use chrono::{DateTime, DurationRound, Utc};
 use deadpool_postgres::Client;
-use std::collections::HashMap;
 use std::str::FromStr;
 use std::time::{Duration, Instant, SystemTime};
 use tokio_postgres::binary_copy::BinaryCopyInWriter;

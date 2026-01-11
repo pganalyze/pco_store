@@ -30,7 +30,7 @@ pub async fn store() -> Result<()> {
             FROM query_stats WHERE database_id = $1
         ";
         let rows = db.query(sql, &[&database_id]).await?;
-        let mut grouped_rows: HashMap<_, Vec<_>> = HashMap::new();
+        let mut grouped_rows: AHashMap<_, Vec<_>> = AHashMap::new();
         for row in rows {
             let time: DateTime<Utc> = row.get::<_, SystemTime>(0).into();
             let date = time.duration_trunc(chrono::Duration::days(1)).unwrap();
