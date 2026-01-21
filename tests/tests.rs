@@ -51,8 +51,7 @@ async fn timestamp() {
             calls bytea STORAGE EXTERNAL NOT NULL,
             total_time bytea STORAGE EXTERNAL NOT NULL
         );
-        CREATE INDEX ON query_stats USING btree (database_id);
-        CREATE INDEX ON query_stats USING btree (end_at, start_at);
+        CREATE INDEX ON query_stats USING btree (database_id, end_at, start_at);
     ";
     db.batch_execute(sql).await.unwrap();
 
@@ -73,16 +72,19 @@ async fn timestamp() {
     }
     assert_eq!(calls, 2);
 
-    // Delete and re-group
+    // Delete and re-group to improve compression
     assert_eq!(2, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
     let mut stats = Vec::new();
     for group in CompressedQueryStats::delete(db, &[database_id], start, end).await.unwrap() {
-        for stat in group.decompress().unwrap() {
-            stats.push(stat);
-        }
+        stats.extend(group.decompress().unwrap());
     }
     assert_eq!(0, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
-    CompressedQueryStats::store(db, stats).await.unwrap();
+    CompressedQueryStats::store_grouped(db, stats, |stat| {
+        let collected_at: chrono::DateTime<chrono::Utc> = stat.collected_at.into();
+        collected_at.duration_trunc(chrono::Duration::days(1)).ok()
+    })
+    .await
+    .unwrap();
     assert_eq!(1, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
     let group = CompressedQueryStats::load(db, &[database_id], start, end).await.unwrap().remove(0);
     assert_eq!(group.start_at, end - Duration::from_secs(120));
@@ -180,8 +182,7 @@ async fn aggregate() {
             calls bytea STORAGE EXTERNAL NOT NULL,
             total_time bytea STORAGE EXTERNAL NOT NULL
         ) PARTITION BY LIST (granularity);
-        CREATE INDEX ON query_stats USING btree (database_id);
-        CREATE INDEX ON query_stats USING btree (end_at, start_at);
+        CREATE INDEX ON query_stats USING btree (database_id, end_at, start_at, granularity);
         CREATE TABLE query_stats_1min PARTITION OF query_stats FOR VALUES IN (60);
         CREATE TABLE query_stats_1hour PARTITION OF query_stats FOR VALUES IN (3600);
     ";
