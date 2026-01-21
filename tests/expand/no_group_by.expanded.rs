@@ -90,7 +90,7 @@ impl CompressedQueryStats {
         if rows.is_empty() {
             return Ok(());
         }
-        let mut grouped_rows: std::collections::HashMap<_, Vec<QueryStat>> = std::collections::HashMap::new();
+        let mut grouped_rows: ahash::AHashMap<_, Vec<QueryStat>> = ahash::AHashMap::new();
         for row in rows {
             grouped_rows.entry(()).or_default().push(row);
         }
@@ -150,7 +150,7 @@ impl CompressedQueryStats {
         if rows.is_empty() {
             return Ok(());
         }
-        let mut grouped_rows: std::collections::HashMap<_, Vec<QueryStat>> = std::collections::HashMap::new();
+        let mut grouped_rows: ahash::AHashMap<_, Vec<QueryStat>> = ahash::AHashMap::new();
         for row in rows {
             grouped_rows.entry((grouping(&row))).or_default().push(row);
         }
