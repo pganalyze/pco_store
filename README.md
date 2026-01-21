@@ -41,13 +41,14 @@ With a Rust struct that groups timeseries stats into a single row per `database_
 ```rs
 use std::time::{Duration, SystemTime};
 
-#[pco_store::store(timestamp = collected_at, group_by = [database_id], float_round = 2)]
+#[pco_store::store(timestamp = collected_at, group_by = [database_id, granularity], float_round = 2)]
 pub struct QueryStat {
     pub database_id: i64,
+    /// Number of seconds captured in the query stat. 60 = 1 minute source data, 3600 = 1 hour aggregation
+    pub granularity: i32,
     pub collected_at: SystemTime,
     pub fingerprint: i64,
     pub calls: i64,
-    pub total_time: f64,
 }
 ```
 
@@ -56,25 +57,24 @@ And a matching Postgres table:
 ```sql
 CREATE TABLE query_stats (
     database_id bigint NOT NULL,
+    granularity int NOT NULL,
     start_at timestamptz NOT NULL,
     end_at timestamptz NOT NULL,
     collected_at bytea STORAGE EXTERNAL NOT NULL,
     fingerprint bytea STORAGE EXTERNAL NOT NULL,
-    calls bytea STORAGE EXTERNAL NOT NULL,
-    total_time bytea STORAGE EXTERNAL NOT NULL
-);
-CREATE INDEX ON query_stats USING btree (database_id);
-CREATE INDEX ON query_stats USING btree (end_at, start_at);
+    calls bytea STORAGE EXTERNAL NOT NULL
+) PARTITION BY LIST (granularity);
+
+CREATE TABLE query_stats_1min PARTITION OF query_stats FOR VALUES IN (60);
+CREATE TABLE query_stats_1hour PARTITION OF query_stats FOR VALUES IN (3600);
+
+CREATE INDEX ON query_stats USING btree (database_id, end_at, start_at, granularity);
 ```
 
-`STORAGE EXTERNAL` is set so that Postgres doesn't try to compress the already-compressed fields
-
-This uses a `(end_at, start_at)` index because it's more selective than `(start_at, end_at)` for common use cases. For example when loading the last week of stats, the `end_at` filter is what's doing the work to filter out rows.
-```sql
-end_at >= now() - interval '7 days' AND start_at <= now()
-```
-
-The stats can be written with `store`, read with `load` + `decompress`, and deleted with `delete`:
+The stats can be:
+- written with `store`
+- read with `load` + `decompress`
+- rewritten for better compression with `delete` + `store_grouped`
 
 ```rs
 async fn example() -> anyhow::Result<()> {
@@ -84,9 +84,10 @@ async fn example() -> anyhow::Result<()> {
     let db = &DB_POOL.get().await?;
 
     // Write
-    let stats = vec![QueryStat { database_id, collected_at: end - Duration::from_secs(120), fingerprint: 1, calls: 1, total_time: 1.0 }];
+    let default = QueryStat { database_id, granularity: 60, collected_at: end, fingerprint: 1, calls: 1 };
+    let stats = vec![QueryStat { collected_at: end - Duration::from_secs(120), ..default }];
     CompressedQueryStats::store(db, stats).await?;
-    let stats = vec![QueryStat { database_id, collected_at: end - Duration::from_secs(60), fingerprint: 1, calls: 1, total_time: 1.0 }];
+    let stats = vec![QueryStat { collected_at: end - Duration::from_secs(60), ..default }];
     CompressedQueryStats::store(db, stats).await?;
 
     // Read
@@ -98,21 +99,20 @@ async fn example() -> anyhow::Result<()> {
     }
     assert_eq!(calls, 2);
 
-    // Delete and re-group to improve compression ratio
-    //
-    // Note: you'll want to choose the time range passed to `delete` so it only groups, for example, stats
-    // from the past day into a fewer number of rows. There's a balance to be reached between compression
-    // ratio and not slowing down read queries with unwanted data from outside the requested time range.
+    // Delete and re-group to improve compression ratio. This example compacts data into a single row per day.
+    // The ideal group size will depend on the size and volume of your data.
     assert_eq!(2, db.query_one("SELECT count(*) FROM query_stats", &[]).await?.get::<_, i64>(0));
     transaction!(db, {
         let mut stats = Vec::new();
         for group in CompressedQueryStats::delete(db, &[database_id], start, end).await? {
-            for stat in group.decompress()? {
-                stats.push(stat);
-            }
+            stats.extend(group.decompress()?);
         }
         assert_eq!(0, db.query_one("SELECT count(*) FROM query_stats", &[]).await?.get::<_, i64>(0));
-        CompressedQueryStats::store(db, stats).await?;
+        CompressedQueryStats::store_grouped(db, stats, |stat| {
+            let collected_at: chrono::DateTime<chrono::Utc> = stat.collected_at.into();
+            collected_at.duration_trunc(chrono::Duration::days(1)).ok()
+        })
+        .await?;
     });
     assert_eq!(1, db.query_one("SELECT count(*) FROM query_stats", &[]).await?.get::<_, i64>(0));
     let group = CompressedQueryStats::load(db, &[database_id], start, end).await?.remove(0);
