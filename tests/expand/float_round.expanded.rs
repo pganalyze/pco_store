@@ -87,7 +87,7 @@ impl CompressedQueryStats {
         }
         Ok(results)
     }
-    /// Writes the provided data to disk.
+    /// Writes the data to disk.
     pub async fn store(
         db: &deadpool_postgres::Object,
         rows: Vec<QueryStat>,
@@ -98,6 +98,65 @@ impl CompressedQueryStats {
         let mut grouped_rows: ahash::AHashMap<_, Vec<QueryStat>> = ahash::AHashMap::new();
         for row in rows {
             grouped_rows.entry((row.database_id,)).or_default().push(row);
+        }
+        let sql = "COPY query_stats (database_id, calls, total_time) FROM STDIN BINARY";
+        let types = &[
+            tokio_postgres::types::Type::INT8,
+            tokio_postgres::types::Type::BYTEA,
+            tokio_postgres::types::Type::BYTEA,
+        ];
+        let stmt = db.copy_in(&db.prepare_cached(&sql).await?).await?;
+        let writer = tokio_postgres::binary_copy::BinaryCopyInWriter::new(stmt, types);
+        let mut writer = writer;
+        #[allow(unused_mut)]
+        let mut writer = unsafe {
+            ::pin_utils::core_reexport::pin::Pin::new_unchecked(&mut writer)
+        };
+        for rows in grouped_rows.into_values() {
+            writer
+                .as_mut()
+                .write(
+                    &[
+                        &rows[0].database_id,
+                        &::pco::standalone::simpler_compress(
+                                &rows.iter().map(|r| r.calls).collect::<Vec<_>>(),
+                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                            )
+                            .unwrap(),
+                        &::pco::standalone::simpler_compress(
+                                &rows
+                                    .iter()
+                                    .map(|r| (r.total_time * 100f32 as f64).round() as i64)
+                                    .collect::<Vec<_>>(),
+                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                            )
+                            .unwrap(),
+                    ],
+                )
+                .await?;
+        }
+        writer.finish().await?;
+        Ok(())
+    }
+    /// Writes the data to disk, with the provided grouping closure applied.
+    ///
+    /// This can be used to improve the compression ratio and reduce read IO, for example
+    /// by compacting real-time data into a single row per hour / day / week.
+    pub async fn store_grouped<F, R>(
+        db: &deadpool_postgres::Object,
+        rows: Vec<QueryStat>,
+        grouping: F,
+    ) -> anyhow::Result<()>
+    where
+        F: Fn(&QueryStat) -> R,
+        R: Eq + std::hash::Hash,
+    {
+        if rows.is_empty() {
+            return Ok(());
+        }
+        let mut grouped_rows: ahash::AHashMap<_, Vec<QueryStat>> = ahash::AHashMap::new();
+        for row in rows {
+            grouped_rows.entry((row.database_id, grouping(&row))).or_default().push(row);
         }
         let sql = "COPY query_stats (database_id, calls, total_time) FROM STDIN BINARY";
         let types = &[
