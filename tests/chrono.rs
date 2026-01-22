@@ -204,7 +204,8 @@ async fn aggregate() {
     // Aggregate into hourly bucket
     assert_eq!(2, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
     let mut stats: AHashMap<_, QueryStat> = AHashMap::new();
-    let start: chrono::DateTime<Utc> = DateTime::<Utc>::from(end - Duration::seconds(3600)).duration_trunc(chrono::Duration::hours(1)).unwrap().into();
+    let start: chrono::DateTime<Utc> =
+        DateTime::<Utc>::from(end - Duration::seconds(3600)).duration_trunc(chrono::Duration::hours(1)).unwrap().into();
     let end = start + Duration::seconds(3600);
     for group in CompressedQueryStats::load(db, &[database_id], &[60], start, end).await.unwrap() {
         for stat in group.decompress().unwrap() {
