@@ -173,18 +173,17 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
             });
             compressed_field_sizes.push(quote! { #ident.len(), });
             if timestamp.as_ref().map(|t| *t == ident).unwrap_or(false) {
-                let epoch;
-                let offset;
-
-                if using_chrono {
-                    epoch = quote! { chrono::DateTime::UNIX_EPOCH };
-                    offset = quote! { chrono::Duration::microseconds(#ident[index] as i64) };
+                let value = if using_chrono {
+                    quote! {
+                        chrono::DateTime::UNIX_EPOCH + chrono::Duration::microseconds(#ident[index] as i64)
+                    }
                 } else {
-                    epoch = quote! { std::time::SystemTime::UNIX_EPOCH };
-                    offset = quote! { std::time::Duration::from_micros(#ident[index]) };
-                }
+                    quote! {
+                        std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_micros(#ident[index])
+                    }
+                };
                 decompressed_fields.push(quote! {
-                    #ident: #epoch + #offset,
+                    #ident: #value,
                 });
             } else if round_float_field {
                 decompressed_fields.push(quote! {
