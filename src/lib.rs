@@ -79,6 +79,8 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
     let mut load_fields = Vec::new();
     let mut bind = 1;
     let mut index: usize = 0;
+    let mut timestamp_ty: Option<_> = None;
+    let mut using_chrono = false;
     for field in model.fields.iter() {
         let ident = field.ident.clone().unwrap();
         let ty = field.ty.clone();
@@ -95,12 +97,16 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
             bind += 1;
             load_params.push(quote! { &#ident, });
         } else if timestamp.as_ref().map(|t| *t == ident).unwrap_or(false) {
+            timestamp_ty = Some(ty.clone());
+            // FIXME: The following line doesn't work. If you manually set using_chrono=true, query_stats_chrono.rs expands as expected.
+            //using_chrono = ty == Type::Verbatim(quote! { chrono::DateTime });
+            //using_chrono = true;
             fields.push(quote! {
                 pub filter: bool,
-                pub filter_start: SystemTime,
-                pub filter_end: SystemTime,
-                pub start_at: SystemTime,
-                pub end_at: SystemTime,
+                pub filter_start: #ty,
+                pub filter_end: #ty,
+                pub start_at: #ty,
+                pub end_at: #ty,
                 #ident: Vec<u8>,
             });
             load_where.push(format!("end_at >= ${bind}"));
@@ -122,9 +128,10 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
     }
     let mut delete_fields = load_fields.clone();
     if timestamp.is_some() {
+        let ty = timestamp_ty.unwrap_or_else(|| Type::Verbatim(quote! { std::time::SystemTime }));
         load_filters.push(quote! {
-            filter_start: SystemTime,
-            filter_end: SystemTime,
+            filter_start: #ty,
+            filter_end: #ty,
         });
         load_fields.push(quote! { filter: true, filter_start, filter_end, });
         delete_fields.push(quote! { filter: false, filter_start, filter_end, });
@@ -167,8 +174,18 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
             });
             compressed_field_sizes.push(quote! { #ident.len(), });
             if timestamp.as_ref().map(|t| *t == ident).unwrap_or(false) {
+                let epoch;
+                let offset;
+
+                if using_chrono {
+                    epoch = quote! { chrono::DateTime::UNIX_EPOCH };
+                    offset = quote! { chrono::Duration::microseconds(#ident[index] as i64) };
+                } else {
+                    epoch = quote! { SystemTime::UNIX_EPOCH };
+                    offset = quote! { std::time::Duration::from_micros(#ident[index]) };
+                }
                 decompressed_fields.push(quote! {
-                    #ident: SystemTime::UNIX_EPOCH + std::time::Duration::from_micros(#ident[index]),
+                    #ident: #epoch + #offset,
                 });
             } else if round_float_field {
                 decompressed_fields.push(quote! {
@@ -247,13 +264,18 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
     let store_types = tokens(store_types.into_iter().map(|t| quote! { tokio_postgres::types::Type::#t, }).collect());
     let store_group = tokens(store_group);
     let store_values = tokens(store_values);
+    let map_inner = if using_chrono {
+        quote! { t.signed_duration_since(chrono::DateTime::UNIX_EPOCH).num_microseconds().unwrap() as u64 }
+    } else {
+        quote! { t.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_micros() as u64 }
+    };
     let timestamp_collect = if timestamp.is_some() {
         quote! {
             let #timestamp: Vec<_> = rows.iter().map(|s| s.#timestamp).collect();
             let start_at = *#timestamp.iter().min().unwrap();
             let end_at = *#timestamp.iter().max().unwrap();
             let #timestamp: Vec<u64> = #timestamp.into_iter().map(|t|
-                t.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_micros() as u64).collect();
+                #map_inner).collect();
         }
     } else {
         quote! {}
