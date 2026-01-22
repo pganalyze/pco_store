@@ -3,6 +3,7 @@ use proc_macro2::Span;
 use quote::quote;
 use syn::parse::{Parse, ParseStream};
 use syn::{Ident, ItemStruct, Lit, Result, Token, Type, bracketed, parse_macro_input};
+use quote::ToTokens;
 
 struct Arguments {
     timestamp: Option<Ident>,
@@ -98,9 +99,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
             load_params.push(quote! { &#ident, });
         } else if timestamp.as_ref().map(|t| *t == ident).unwrap_or(false) {
             timestamp_ty = Some(ty.clone());
-            // FIXME: The following line doesn't work. If you manually set using_chrono=true, query_stats_chrono.rs expands as expected.
-            //using_chrono = ty == Type::Verbatim(quote! { chrono::DateTime });
-            //using_chrono = true;
+            using_chrono = !ty.to_token_stream().to_string().contains("SystemTime");
             fields.push(quote! {
                 pub filter: bool,
                 pub filter_start: #ty,
