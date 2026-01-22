@@ -21,7 +21,7 @@ pco = "0.4"
 proc-macro2 = "1.0"
 quote = "1.0"
 syn = "2.0"
-tokio-postgres = "0.7"
+tokio-postgres = { version = "0.7", features = ["with-chrono-0_4"] }
 
 [dev-dependencies]
 chrono = "0.4"
