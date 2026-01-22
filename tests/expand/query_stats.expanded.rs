@@ -216,7 +216,7 @@ impl CompressedQueryStats {
         for index in 0..len {
             let row = QueryStat {
                 database_id: self.database_id,
-                collected_at: SystemTime::UNIX_EPOCH
+                collected_at: std::time::SystemTime::UNIX_EPOCH
                     + std::time::Duration::from_micros(collected_at[index]),
                 collected_secs: collected_secs.get(index).cloned().unwrap_or_default(),
                 fingerprint: fingerprint.get(index).cloned().unwrap_or_default(),
@@ -292,7 +292,10 @@ impl CompressedQueryStats {
             let collected_at: Vec<u64> = collected_at
                 .into_iter()
                 .map(|t| {
-                    t.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_micros() as u64
+                    t
+                        .duration_since(std::time::SystemTime::UNIX_EPOCH)
+                        .unwrap()
+                        .as_micros() as u64
                 })
                 .collect();
             writer

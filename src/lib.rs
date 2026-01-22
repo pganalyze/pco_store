@@ -180,7 +180,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
                     epoch = quote! { chrono::DateTime::UNIX_EPOCH };
                     offset = quote! { chrono::Duration::microseconds(#ident[index] as i64) };
                 } else {
-                    epoch = quote! { SystemTime::UNIX_EPOCH };
+                    epoch = quote! { std::time::SystemTime::UNIX_EPOCH };
                     offset = quote! { std::time::Duration::from_micros(#ident[index]) };
                 }
                 decompressed_fields.push(quote! {
@@ -266,7 +266,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
     let map_inner = if using_chrono {
         quote! { t.signed_duration_since(chrono::DateTime::UNIX_EPOCH).num_microseconds().unwrap() as u64 }
     } else {
-        quote! { t.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_micros() as u64 }
+        quote! { t.duration_since(std::time::SystemTime::UNIX_EPOCH).unwrap().as_micros() as u64 }
     };
     let timestamp_collect = if timestamp.is_some() {
         quote! {
