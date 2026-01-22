@@ -1,6 +1,6 @@
 pub struct QueryStat {
     pub database_id: i64,
-    pub collected_at: SystemTime,
+    pub collected_at: chrono::DateTime,
     pub collected_secs: i64,
     pub fingerprint: i64,
     pub postgres_role_id: i64,
@@ -15,10 +15,10 @@ pub struct QueryStat {
 pub struct CompressedQueryStats {
     pub database_id: i64,
     pub filter: bool,
-    pub filter_start: SystemTime,
-    pub filter_end: SystemTime,
-    pub start_at: SystemTime,
-    pub end_at: SystemTime,
+    pub filter_start: chrono::DateTime,
+    pub filter_end: chrono::DateTime,
+    pub start_at: chrono::DateTime,
+    pub end_at: chrono::DateTime,
     collected_at: Vec<u8>,
     collected_secs: Vec<u8>,
     fingerprint: Vec<u8>,
@@ -38,15 +38,26 @@ impl CompressedQueryStats {
     pub async fn load(
         db: &deadpool_postgres::Object,
         database_id: &[i64],
-        filter_start: SystemTime,
-        filter_end: SystemTime,
+        filter_start: chrono::DateTime,
+        filter_end: chrono::DateTime,
     ) -> anyhow::Result<Vec<CompressedQueryStats>> {
         if database_id.is_empty() {
-            return Err(
-                anyhow::Error::msg("database_id".to_string() + "must be specified"),
-            );
+            return ::anyhow::__private::Err({
+                use ::anyhow::__private::kind::*;
+                let error = match "database_id".to_string() + "must be specified" {
+                    error => (&error).anyhow_kind().new(error),
+                };
+                error
+            });
         }
-        let sql = "SELECT * FROM query_stats WHERE database_id = ANY($1) AND end_at >= $2 AND start_at <= $3";
+        let sql = ::alloc::__export::must_use({
+            ::alloc::fmt::format(
+                format_args!(
+                    "SELECT * FROM {0} WHERE {1}", "query_stats",
+                    "database_id = ANY($1) AND end_at >= $2 AND start_at <= $3",
+                ),
+            )
+        });
         let mut results = Vec::new();
         for row in db
             .query(
@@ -84,15 +95,26 @@ impl CompressedQueryStats {
     pub async fn delete(
         db: &deadpool_postgres::Object,
         database_id: &[i64],
-        filter_start: SystemTime,
-        filter_end: SystemTime,
+        filter_start: chrono::DateTime,
+        filter_end: chrono::DateTime,
     ) -> anyhow::Result<Vec<CompressedQueryStats>> {
         if database_id.is_empty() {
-            return Err(
-                anyhow::Error::msg("database_id".to_string() + "must be specified"),
-            );
+            return ::anyhow::__private::Err({
+                use ::anyhow::__private::kind::*;
+                let error = match "database_id".to_string() + "must be specified" {
+                    error => (&error).anyhow_kind().new(error),
+                };
+                error
+            });
         }
-        let sql = "DELETE FROM query_stats WHERE database_id = ANY($1) AND end_at >= $2 AND start_at <= $3 RETURNING *";
+        let sql = ::alloc::__export::must_use({
+            ::alloc::fmt::format(
+                format_args!(
+                    "DELETE FROM {0} WHERE {1} RETURNING *", "query_stats",
+                    "database_id = ANY($1) AND end_at >= $2 AND start_at <= $3",
+                ),
+            )
+        });
         let mut results = Vec::new();
         for row in db
             .query(
@@ -194,8 +216,8 @@ impl CompressedQueryStats {
         for index in 0..len {
             let row = QueryStat {
                 database_id: self.database_id,
-                collected_at: std::time::SystemTime::UNIX_EPOCH
-                    + std::time::Duration::from_micros(collected_at[index]),
+                collected_at: chrono::DateTime::UNIX_EPOCH
+                    + chrono::Duration::microseconds(collected_at[index] as i64),
                 collected_secs: collected_secs.get(index).cloned().unwrap_or_default(),
                 fingerprint: fingerprint.get(index).cloned().unwrap_or_default(),
                 postgres_role_id: postgres_role_id
@@ -221,7 +243,7 @@ impl CompressedQueryStats {
         }
         Ok(results)
     }
-    /// Writes the data to disk.
+    /// Writes the provided data to disk.
     pub async fn store(
         db: &deadpool_postgres::Object,
         rows: Vec<QueryStat>,
@@ -233,130 +255,14 @@ impl CompressedQueryStats {
         for row in rows {
             grouped_rows.entry((row.database_id,)).or_default().push(row);
         }
-        let sql = "COPY query_stats (database_id, start_at, end_at, collected_at, collected_secs, fingerprint, postgres_role_id, calls, rows, total_time, io_time, shared_blks_hit, shared_blks_read) FROM STDIN BINARY";
-        let types = &[
-            tokio_postgres::types::Type::INT8,
-            tokio_postgres::types::Type::TIMESTAMPTZ,
-            tokio_postgres::types::Type::TIMESTAMPTZ,
-            tokio_postgres::types::Type::BYTEA,
-            tokio_postgres::types::Type::BYTEA,
-            tokio_postgres::types::Type::BYTEA,
-            tokio_postgres::types::Type::BYTEA,
-            tokio_postgres::types::Type::BYTEA,
-            tokio_postgres::types::Type::BYTEA,
-            tokio_postgres::types::Type::BYTEA,
-            tokio_postgres::types::Type::BYTEA,
-            tokio_postgres::types::Type::BYTEA,
-            tokio_postgres::types::Type::BYTEA,
-        ];
-        let stmt = db.copy_in(&db.prepare_cached(&sql).await?).await?;
-        let writer = tokio_postgres::binary_copy::BinaryCopyInWriter::new(stmt, types);
-        let mut writer = writer;
-        #[allow(unused_mut)]
-        let mut writer = unsafe {
-            ::pin_utils::core_reexport::pin::Pin::new_unchecked(&mut writer)
-        };
-        for rows in grouped_rows.into_values() {
-            let collected_at: Vec<_> = rows.iter().map(|s| s.collected_at).collect();
-            let start_at = *collected_at.iter().min().unwrap();
-            let end_at = *collected_at.iter().max().unwrap();
-            let collected_at: Vec<u64> = collected_at
-                .into_iter()
-                .map(|t| {
-                    t.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_micros() as u64
-                })
-                .collect();
-            writer
-                .as_mut()
-                .write(
-                    &[
-                        &rows[0].database_id,
-                        &start_at,
-                        &end_at,
-                        &::pco::standalone::simpler_compress(
-                                &collected_at,
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
-                        &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.collected_secs).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
-                        &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.fingerprint).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
-                        &::pco::standalone::simpler_compress(
-                                &rows
-                                    .iter()
-                                    .map(|r| r.postgres_role_id)
-                                    .collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
-                        &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.calls).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
-                        &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.rows).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
-                        &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.total_time).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
-                        &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.io_time).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
-                        &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.shared_blks_hit).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
-                        &::pco::standalone::simpler_compress(
-                                &rows
-                                    .iter()
-                                    .map(|r| r.shared_blks_read)
-                                    .collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
-                    ],
-                )
-                .await?;
-        }
-        writer.finish().await?;
-        Ok(())
-    }
-    /// Writes the data to disk, with the provided grouping closure applied.
-    ///
-    /// This can be used to improve the compression ratio and reduce read IO, for example
-    /// by compacting real-time data into a single row per hour / day / week.
-    pub async fn store_grouped<F, R>(
-        db: &deadpool_postgres::Object,
-        rows: Vec<QueryStat>,
-        grouping: F,
-    ) -> anyhow::Result<()>
-    where
-        F: Fn(&QueryStat) -> R,
-        R: Eq + std::hash::Hash,
-    {
-        if rows.is_empty() {
-            return Ok(());
-        }
-        let mut grouped_rows: ahash::AHashMap<_, Vec<QueryStat>> = ahash::AHashMap::new();
-        for row in rows {
-            grouped_rows.entry((row.database_id, grouping(&row))).or_default().push(row);
-        }
-        let sql = "COPY query_stats (database_id, start_at, end_at, collected_at, collected_secs, fingerprint, postgres_role_id, calls, rows, total_time, io_time, shared_blks_hit, shared_blks_read) FROM STDIN BINARY";
+        let sql = ::alloc::__export::must_use({
+            ::alloc::fmt::format(
+                format_args!(
+                    "COPY {0} ({1}) FROM STDIN BINARY", "query_stats",
+                    "database_id, start_at, end_at, collected_at, collected_secs, fingerprint, postgres_role_id, calls, rows, total_time, io_time, shared_blks_hit, shared_blks_read",
+                ),
+            )
+        });
         let types = &[
             tokio_postgres::types::Type::INT8,
             tokio_postgres::types::Type::TIMESTAMPTZ,
@@ -387,9 +293,9 @@ impl CompressedQueryStats {
                 .into_iter()
                 .map(|t| {
                     t
-                        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                        .unwrap()
-                        .as_micros() as u64
+                        .signed_duration_since(chrono::DateTime::UNIX_EPOCH)
+                        .num_microseconds()
+                        .unwrap() as u64
                 })
                 .collect();
             writer
