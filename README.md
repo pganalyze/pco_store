@@ -12,7 +12,7 @@ To see the generated code, look in [tests/expand](tests/expand) or run `cargo ex
 ## Supported data types
 
 - pco supports `u16`, `u32`, `u64`, `i16`, `i32`, `i64`, `f16`, `f32`, `f64`
-- pco_store adds support for `SystemTime`, `bool`
+- pco_store adds support for `chrono::DateTime`, `std::time::SystemTime`, `bool`
 
 ## Performance
 
@@ -79,12 +79,13 @@ The stats can be:
 ```rs
 async fn example() -> anyhow::Result<()> {
     let database_id = 1;
+    let granularity = 60;
     let start = SystemTime::UNIX_EPOCH;
     let end = SystemTime::now();
     let db = &DB_POOL.get().await?;
 
     // Write
-    let default = QueryStat { database_id, granularity: 60, collected_at: end, fingerprint: 1, calls: 1 };
+    let default = QueryStat { database_id, granularity, collected_at: end, fingerprint: 1, calls: 1 };
     let stats = vec![QueryStat { collected_at: end - Duration::from_secs(120), ..default }];
     CompressedQueryStats::store(db, stats).await?;
     let stats = vec![QueryStat { collected_at: end - Duration::from_secs(60), ..default }];
@@ -92,7 +93,8 @@ async fn example() -> anyhow::Result<()> {
 
     // Read
     let mut calls = 0;
-    for group in CompressedQueryStats::load(db, &[database_id], start, end).await? {
+    let filter = Filter::new(&[database_id], &[granularity], start..=end);
+    for group in CompressedQueryStats::load(db, filter.clone()).await? {
         for stat in group.decompress()? {
             calls += stat.calls;
         }
@@ -104,7 +106,7 @@ async fn example() -> anyhow::Result<()> {
     assert_eq!(2, db.query_one("SELECT count(*) FROM query_stats", &[]).await?.get::<_, i64>(0));
     transaction!(db, {
         let mut stats = Vec::new();
-        for group in CompressedQueryStats::delete(db, &[database_id], start, end).await? {
+        for group in CompressedQueryStats::delete(db, filter.clone()).await? {
             stats.extend(group.decompress()?);
         }
         assert_eq!(0, db.query_one("SELECT count(*) FROM query_stats", &[]).await?.get::<_, i64>(0));
@@ -115,7 +117,7 @@ async fn example() -> anyhow::Result<()> {
         .await?;
     });
     assert_eq!(1, db.query_one("SELECT count(*) FROM query_stats", &[]).await?.get::<_, i64>(0));
-    let group = CompressedQueryStats::load(db, &[database_id], start, end).await?.remove(0);
+    let group = CompressedQueryStats::load(db, filter).await?.remove(0);
     assert_eq!(group.start_at, end - Duration::from_secs(120));
     assert_eq!(group.end_at, end - Duration::from_secs(60));
     let stats = group.decompress()?;
@@ -159,6 +161,29 @@ pub use transaction;
 ```
 
 Additional examples can be found in [tests/tests.rs](tests/tests.rs).
+
+## Filtering
+
+pco_store generates a `Filter` struct to specify read-time filters. Required fields from `group_by` and `fingerprint` will be filtered in SQL before the data is decompressed, but other fields can be filtered after decompression but before the data is returned to the caller as an optimization to avoid pointless allocations.
+
+Timestamps are accepted as an inclusive range (with precision automatically truncated to microseconds), and all other fields are accepted as an array to check for inclusion in that array.
+
+### Creating a filter
+
+`Filter::new()` is a shorthand to set the required fields from `group_by` and `timestamp`. After it's created, additional filters can be set as fields on the struct. Struct literal syntax can also be used: `Filter { field: [1], ..Filter::default() }`
+
+Filters can be deserialized using serde. Non-timestamp fields can be passed as a single JSON value which is automatically wrapped in an array.
+
+Timestamps support multiple formats:
+- `["ts1", "ts2"]`: an array with two timestamp strings becomes an inclusive range `ts1..=ts2`
+- `["ts1"]`: an array with a single timestamp string becomes an inclusive range `ts1..=ts1`
+- `"ts1"`: a single timestamp string becomes an inclusive range `ts1..=ts1`
+
+### Filter convenience functions
+
+- `range_bounds` returns the time range lower and upper bounds
+- `range_duration` returns the duration of the filter's time range
+- `range_shift` mutably shifts the time range's start and end by a certain amount, e.g. to filter for "today, 7 days ago"
 
 ## Contributions are welcome to
 
