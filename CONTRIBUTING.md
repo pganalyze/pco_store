@@ -1,5 +1,14 @@
 # Contributing to `pco_store`
 
+## Running tests
+
+Because this crate is a procedural macro, we commit expanded versions of the code to make changes easier to review.
+
+To run the tests and rewrite the expanded files:
+```sh
+MACROTEST=overwrite cargo test
+```
+
 ## Environment Setup
 
 To get started working on `pco_store`, you need to be able to run the tests.
