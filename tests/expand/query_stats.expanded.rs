@@ -2106,6 +2106,12 @@ impl TryFrom<Vec<String>> for Fields {
         Fields::try_from(input.as_slice())
     }
 }
+impl TryFrom<()> for Fields {
+    type Error = &'static str;
+    fn try_from(_: ()) -> Result<Self, Self::Error> {
+        Ok(Fields::default())
+    }
+}
 impl<'de> serde::Deserialize<'de> for Fields {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where

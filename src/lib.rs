@@ -578,6 +578,14 @@ fn fields(model: ItemStruct, args: Arguments) -> proc_macro2::TokenStream {
             }
         }
 
+        impl TryFrom<()> for Fields {
+            type Error = &'static str;
+
+            fn try_from(_: ()) -> Result<Self, Self::Error> {
+                Ok(Fields::default())
+            }
+        }
+
         impl<'de> serde::Deserialize<'de> for Fields {
             fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
             where
