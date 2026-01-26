@@ -1932,7 +1932,11 @@ impl<'de> serde::de::Visitor<'de> for TimeRangeVisitor {
         ) {
             Ok(start) => Ok(TimeRange(Some(start..=start))),
             Err(err) => {
-                Err(E::custom("invalid time format: ".to_string() + &err.to_string()))
+                Err(
+                    E::custom(
+                        "invalid time format: ".to_string() + err.to_string().as_str(),
+                    ),
+                )
             }
         }
     }

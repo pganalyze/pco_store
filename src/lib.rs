@@ -98,11 +98,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
             load_params.push(quote! { &filter.#ident, });
         } else if timestamp.as_ref().map(|t| *t == ident).unwrap_or(false) {
             using_chrono = !ty.to_token_stream().to_string().contains("SystemTime");
-            timestamp_ty = Some(if using_chrono {
-                quote! { chrono::DateTime }
-            } else {
-                quote! { std::time::SystemTime }
-            });
+            timestamp_ty = Some(ty.clone());
             fields.push(quote! { #ident: Vec<u8>, });
             load_checks.push(quote! {
                 if filter.#ident.is_none() {
@@ -166,11 +162,11 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
             if timestamp.as_ref().map(|t| *t == ident).unwrap_or(false) {
                 let value = if using_chrono {
                     quote! {
-                        #timestamp_ty::UNIX_EPOCH + chrono::Duration::microseconds(#ident[index] as i64)
+                        chrono::DateTime::UNIX_EPOCH + chrono::Duration::microseconds(#ident[index] as i64)
                     }
                 } else {
                     quote! {
-                        #timestamp_ty::UNIX_EPOCH + std::time::Duration::from_micros(#ident[index])
+                        std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_micros(#ident[index])
                     }
                 };
                 decompressed_fields.push(quote! {
@@ -249,9 +245,9 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
     let store_group = tokens(store_group);
     let store_values = tokens(store_values);
     let map_inner = if using_chrono {
-        quote! { t.signed_duration_since(#timestamp_ty::UNIX_EPOCH).num_microseconds().unwrap() as u64 }
+        quote! { t.signed_duration_since(chrono::DateTime::UNIX_EPOCH).num_microseconds().unwrap() as u64 }
     } else {
-        quote! { t.duration_since(#timestamp_ty::UNIX_EPOCH).unwrap().as_micros() as u64 }
+        quote! { t.duration_since(std::time::SystemTime::UNIX_EPOCH).unwrap().as_micros() as u64 }
     };
     let timestamp_collect = if timestamp.is_some() {
         quote! {
@@ -395,7 +391,7 @@ fn tokens(input: Vec<proc_macro2::TokenStream>) -> proc_macro2::TokenStream {
     tokens
 }
 
-fn filter(model: ItemStruct, args: Arguments, using_chrono: bool, timestamp_ty: &Option<proc_macro2::TokenStream>) -> proc_macro2::TokenStream {
+fn filter(model: ItemStruct, args: Arguments, using_chrono: bool, timestamp_ty: &Option<Type>) -> proc_macro2::TokenStream {
     let name = model.ident.clone();
     let Arguments { timestamp, group_by, .. } = args;
     let mut filter_fields = Vec::new();
@@ -490,7 +486,7 @@ fn filter(model: ItemStruct, args: Arguments, using_chrono: bool, timestamp_ty: 
     }
 }
 
-fn deserialize_time_range(timestamp_ty: &proc_macro2::TokenStream) -> proc_macro2::TokenStream {
+fn deserialize_time_range(timestamp_ty: &Type) -> proc_macro2::TokenStream {
     quote! {
         /// Deserializes many different time range formats:
         /// - an array with two strings becomes a normal time range: ["a", "b"] -> a..=b
@@ -533,7 +529,7 @@ fn deserialize_time_range(timestamp_ty: &proc_macro2::TokenStream) -> proc_macro
                 }
                 match serde::Deserialize::deserialize(serde::de::value::StrDeserializer::<E>::new(value)) {
                     Ok(start) => Ok(TimeRange(Some(start..=start))),
-                    Err(err) => Err(E::custom("invalid time format: ".to_string() + &err.to_string())),
+                    Err(err) => Err(E::custom("invalid time format: ".to_string() + err.to_string().as_str())),
                 }
             }
 

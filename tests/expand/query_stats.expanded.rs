@@ -1861,9 +1861,7 @@ impl Filter {
         let (start, end) = self.bounds()?;
         Ok(start.duration_since(end)?)
     }
-    pub fn bounds(
-        &self,
-    ) -> anyhow::Result<(std::time::SystemTime, std::time::SystemTime)> {
+    pub fn bounds(&self) -> anyhow::Result<(SystemTime, SystemTime)> {
         use anyhow::Context;
         let timestamp = self.collected_at.clone().context("no timestamp")?;
         Ok((*timestamp.start(), *timestamp.end()))
@@ -1884,14 +1882,14 @@ impl Filter {
 /// - a string literal becomes a single-value time range:           "a" -> a..=a
 fn deserialize_time_range<'de, D>(
     deserializer: D,
-) -> Result<Option<std::ops::RangeInclusive<std::time::SystemTime>>, D::Error>
+) -> Result<Option<std::ops::RangeInclusive<SystemTime>>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
     Ok(TimeRange::deserialize(deserializer)?.0)
 }
 use serde::Deserialize as _;
-struct TimeRange(Option<std::ops::RangeInclusive<std::time::SystemTime>>);
+struct TimeRange(Option<std::ops::RangeInclusive<SystemTime>>);
 #[automatically_derived]
 impl ::core::fmt::Debug for TimeRange {
     #[inline]
@@ -1934,7 +1932,11 @@ impl<'de> serde::de::Visitor<'de> for TimeRangeVisitor {
         ) {
             Ok(start) => Ok(TimeRange(Some(start..=start))),
             Err(err) => {
-                Err(E::custom("invalid time format: ".to_string() + &err.to_string()))
+                Err(
+                    E::custom(
+                        "invalid time format: ".to_string() + err.to_string().as_str(),
+                    ),
+                )
             }
         }
     }
@@ -1942,11 +1944,11 @@ impl<'de> serde::de::Visitor<'de> for TimeRangeVisitor {
     where
         A: serde::de::SeqAccess<'de>,
     {
-        let start = match seq.next_element::<Option<std::time::SystemTime>>()? {
+        let start = match seq.next_element::<Option<SystemTime>>()? {
             Some(Some(time)) => time,
             Some(None) | None => return Ok(TimeRange(None)),
         };
-        let end = match seq.next_element::<Option<std::time::SystemTime>>()? {
+        let end = match seq.next_element::<Option<SystemTime>>()? {
             Some(Some(time)) => time,
             Some(None) | None => start,
         };
