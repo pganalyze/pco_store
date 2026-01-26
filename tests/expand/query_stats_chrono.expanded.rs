@@ -1,7 +1,7 @@
 use serde::Deserialize as _;
 pub struct QueryStat {
     pub database_id: i64,
-    pub collected_at: SystemTime,
+    pub collected_at: chrono::DateTime,
     pub collected_secs: i64,
     pub fingerprint: i64,
     pub postgres_role_id: i64,
@@ -273,8 +273,8 @@ impl CompressedQueryStats {
         for index in 0..len {
             let row = QueryStat {
                 database_id: self.database_id,
-                collected_at: std::time::SystemTime::UNIX_EPOCH
-                    + std::time::Duration::from_micros(collected_at[index]),
+                collected_at: chrono::DateTime::UNIX_EPOCH
+                    + chrono::Duration::microseconds(collected_at[index] as i64),
                 collected_secs: collected_secs.get(index).cloned().unwrap_or_default(),
                 fingerprint: fingerprint.get(index).cloned().unwrap_or_default(),
                 postgres_role_id: postgres_role_id
@@ -340,9 +340,9 @@ impl CompressedQueryStats {
                 .into_iter()
                 .map(|t| {
                     t
-                        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                        .unwrap()
-                        .as_micros() as u64
+                        .signed_duration_since(chrono::DateTime::UNIX_EPOCH)
+                        .num_microseconds()
+                        .unwrap() as u64
                 })
                 .collect();
             writer
@@ -466,9 +466,9 @@ impl CompressedQueryStats {
                 .into_iter()
                 .map(|t| {
                     t
-                        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                        .unwrap()
-                        .as_micros() as u64
+                        .signed_duration_since(chrono::DateTime::UNIX_EPOCH)
+                        .num_microseconds()
+                        .unwrap() as u64
                 })
                 .collect();
             writer
@@ -552,7 +552,7 @@ pub struct Filter {
     )]
     pub database_id: Vec<i64>,
     #[serde(deserialize_with = "deserialize_time_range")]
-    pub collected_at: Option<std::ops::RangeInclusive<SystemTime>>,
+    pub collected_at: Option<std::ops::RangeInclusive<chrono::DateTime>>,
     #[serde(default)]
     #[serde_as(deserialize_as = "serde_with::DefaultOnNull<serde_with::OneOrMany<_>>")]
     #[serde(
@@ -879,7 +879,7 @@ const _: () = {
                     let __field1 = match {
                         #[doc(hidden)]
                         struct __DeserializeWith<'de> {
-                            value: Option<std::ops::RangeInclusive<SystemTime>>,
+                            value: Option<std::ops::RangeInclusive<chrono::DateTime>>,
                             phantom: _serde::__private228::PhantomData<Filter>,
                             lifetime: _serde::__private228::PhantomData<&'de ()>,
                         }
@@ -1281,7 +1281,7 @@ const _: () = {
                 {
                     let mut __field0: _serde::__private228::Option<Vec<i64>> = _serde::__private228::None;
                     let mut __field1: _serde::__private228::Option<
-                        Option<std::ops::RangeInclusive<SystemTime>>,
+                        Option<std::ops::RangeInclusive<chrono::DateTime>>,
                     > = _serde::__private228::None;
                     let mut __field2: _serde::__private228::Option<Vec<i64>> = _serde::__private228::None;
                     let mut __field3: _serde::__private228::Option<Vec<i64>> = _serde::__private228::None;
@@ -1352,7 +1352,7 @@ const _: () = {
                                 __field1 = _serde::__private228::Some({
                                     #[doc(hidden)]
                                     struct __DeserializeWith<'de> {
-                                        value: Option<std::ops::RangeInclusive<SystemTime>>,
+                                        value: Option<std::ops::RangeInclusive<chrono::DateTime>>,
                                         phantom: _serde::__private228::PhantomData<Filter>,
                                         lifetime: _serde::__private228::PhantomData<&'de ()>,
                                     }
@@ -1919,7 +1919,7 @@ impl Filter {
     /// Builds new filter with the required fields defined by `group_by` and `timestamp`
     pub fn new(
         database_id: &[i64],
-        collected_at: std::ops::RangeInclusive<SystemTime>,
+        collected_at: std::ops::RangeInclusive<chrono::DateTime>,
     ) -> Self {
         Self {
             database_id: database_id.into(),
@@ -1946,13 +1946,11 @@ impl Filter {
             && (self.shared_blks_read.is_empty()
                 || self.shared_blks_read.contains(&row.shared_blks_read))
     }
-    pub fn duration(&self) -> anyhow::Result<std::time::Duration> {
+    pub fn duration(&self) -> anyhow::Result<chrono::Duration> {
         let (start, end) = self.bounds()?;
-        Ok(start.duration_since(end)?)
+        Ok(end - start)
     }
-    pub fn bounds(
-        &self,
-    ) -> anyhow::Result<(std::time::SystemTime, std::time::SystemTime)> {
+    pub fn bounds(&self) -> anyhow::Result<(chrono::DateTime, chrono::DateTime)> {
         use anyhow::Context;
         let timestamp = self.collected_at.clone().context("no timestamp")?;
         Ok((*timestamp.start(), *timestamp.end()))
@@ -1960,7 +1958,7 @@ impl Filter {
     /// Shifts the filtered time range. This for example makes it easier
     /// to perform two queries: once for "today", and one for "today, 7 days ago".
     /// In that example the second query would do `filter.shift(Duration::days(-7))`
-    pub fn shift(&mut self, duration: std::time::Duration) -> anyhow::Result<()> {
+    pub fn shift(&mut self, duration: chrono::Duration) -> anyhow::Result<()> {
         use std::ops::Add;
         let (start, end) = self.bounds()?;
         self.collected_at = Some(start.add(duration)..=end.add(duration));
@@ -2143,13 +2141,13 @@ impl<'de> serde::de::Visitor<'de> for FieldsVisitor {
 /// - a string literal becomes a single-value time range:           "a" -> a..=a
 fn deserialize_time_range<'de, D>(
     deserializer: D,
-) -> Result<Option<std::ops::RangeInclusive<std::time::SystemTime>>, D::Error>
+) -> Result<Option<std::ops::RangeInclusive<chrono::DateTime>>, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
     Ok(TimeRange::deserialize(deserializer)?.0)
 }
-struct TimeRange(Option<std::ops::RangeInclusive<std::time::SystemTime>>);
+struct TimeRange(Option<std::ops::RangeInclusive<chrono::DateTime>>);
 #[automatically_derived]
 impl ::core::fmt::Debug for TimeRange {
     #[inline]
@@ -2200,11 +2198,11 @@ impl<'de> serde::de::Visitor<'de> for TimeRangeVisitor {
     where
         A: serde::de::SeqAccess<'de>,
     {
-        let start = match seq.next_element::<Option<std::time::SystemTime>>()? {
+        let start = match seq.next_element::<Option<chrono::DateTime>>()? {
             Some(Some(time)) => time,
             Some(None) | None => return Ok(TimeRange(None)),
         };
-        let end = match seq.next_element::<Option<std::time::SystemTime>>()? {
+        let end = match seq.next_element::<Option<chrono::DateTime>>()? {
             Some(Some(time)) => time,
             Some(None) | None => start,
         };
