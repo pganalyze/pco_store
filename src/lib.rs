@@ -512,23 +512,23 @@ fn filter(model: ItemStruct, args: Arguments, using_chrono: bool, timestamp_ty: 
 fn fields(model: ItemStruct, args: Arguments) -> proc_macro2::TokenStream {
     let Arguments { timestamp, group_by, .. } = args;
     let mut fields = Vec::new();
-    let mut all = Vec::new();
+    let mut required = Vec::new();
     let mut default = Vec::new();
     let mut from = Vec::new();
     for field in model.fields.iter() {
         let ident = field.ident.clone().unwrap();
         let name = format!("{ident}");
         fields.push(quote! { #ident: bool, });
-        all.push(quote! { #ident: true, });
         if group_by.iter().any(|i| *i == ident) || timestamp.as_ref().map(|t| *t == ident).unwrap_or(false) {
-            default.push(quote! { #ident: true, });
+            required.push(quote! { #ident: true, });
         } else {
-            default.push(quote! { #ident: false, });
+            required.push(quote! { #ident: false, });
         }
+        default.push(quote! { #ident: true, });
         from.push(quote! { #name => fields.#ident = true, });
     }
     let fields = tokens(fields);
-    let all = tokens(all);
+    let required = tokens(required);
     let default = tokens(default);
     let from = tokens(from);
     quote! {
@@ -542,8 +542,8 @@ fn fields(model: ItemStruct, args: Arguments) -> proc_macro2::TokenStream {
                 fields.try_into().map_err(|e| anyhow::Error::msg(e))
             }
 
-            pub fn all() -> Self {
-                Self { #all }
+            pub fn required() -> Self {
+                Self { #required }
             }
         }
 
@@ -557,7 +557,7 @@ fn fields(model: ItemStruct, args: Arguments) -> proc_macro2::TokenStream {
             type Error = &'static str;
 
             fn try_from(input: &[&str]) -> Result<Self, Self::Error> {
-                let mut fields = Fields::default();
+                let mut fields = Fields::required();
                 for s in input {
                     match *s {
                         #from

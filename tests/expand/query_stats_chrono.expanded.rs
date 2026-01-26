@@ -2041,24 +2041,7 @@ impl Fields {
     pub fn new(fields: &[&str]) -> anyhow::Result<Self> {
         fields.try_into().map_err(|e| anyhow::Error::msg(e))
     }
-    pub fn all() -> Self {
-        Self {
-            database_id: true,
-            collected_at: true,
-            collected_secs: true,
-            fingerprint: true,
-            postgres_role_id: true,
-            calls: true,
-            rows: true,
-            total_time: true,
-            io_time: true,
-            shared_blks_hit: true,
-            shared_blks_read: true,
-        }
-    }
-}
-impl Default for Fields {
-    fn default() -> Self {
+    pub fn required() -> Self {
         Self {
             database_id: true,
             collected_at: true,
@@ -2074,10 +2057,27 @@ impl Default for Fields {
         }
     }
 }
+impl Default for Fields {
+    fn default() -> Self {
+        Self {
+            database_id: true,
+            collected_at: true,
+            collected_secs: true,
+            fingerprint: true,
+            postgres_role_id: true,
+            calls: true,
+            rows: true,
+            total_time: true,
+            io_time: true,
+            shared_blks_hit: true,
+            shared_blks_read: true,
+        }
+    }
+}
 impl TryFrom<&[&str]> for Fields {
     type Error = &'static str;
     fn try_from(input: &[&str]) -> Result<Self, Self::Error> {
-        let mut fields = Fields::default();
+        let mut fields = Fields::required();
         for s in input {
             match *s {
                 "database_id" => fields.database_id = true,
