@@ -7,6 +7,7 @@ use std::time::{Duration, SystemTime};
 #[test]
 fn macrotest() {
     macrotest::expand("tests/expand/query_stats.rs");
+    macrotest::expand("tests/expand/query_stats_chrono.rs");
     macrotest::expand("tests/expand/boolean.rs");
     macrotest::expand("tests/expand/float_round.rs");
 }
