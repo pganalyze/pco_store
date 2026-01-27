@@ -1,17 +1,5 @@
 use chrono::{TimeZone, Utc};
-use std::str::FromStr;
 use std::time::SystemTime;
-
-pub static DB_POOL: std::sync::LazyLock<std::sync::Arc<deadpool_postgres::Pool>> = std::sync::LazyLock::new(|| {
-    if std::path::Path::new(".env").exists() {
-        dotenvy::dotenv().unwrap();
-    }
-    let url = std::env::var("DATABASE_URL").unwrap_or("postgresql://localhost:5432/postgres".to_string());
-    let pg_config = tokio_postgres::Config::from_str(&url).unwrap();
-    let mgr_config = deadpool_postgres::ManagerConfig { recycling_method: deadpool_postgres::RecyclingMethod::Fast };
-    let mgr = deadpool_postgres::Manager::from_config(pg_config, tokio_postgres::NoTls, mgr_config);
-    deadpool_postgres::Pool::builder(mgr).build().unwrap().into()
-});
 
 #[tokio::test]
 #[serial_test::serial]
@@ -25,7 +13,7 @@ async fn systemtime_chrono_interop() {
     let database_id = 1;
     let start = Utc.with_ymd_and_hms(2026, 01, 01, 1, 00, 00).unwrap();
     let end = Utc.with_ymd_and_hms(2026, 01, 01, 5, 00, 00).unwrap();
-    let db = &DB_POOL.get().await.unwrap();
+    let db = &super::DB_POOL.get().await.unwrap();
     let sql = "
         DROP TABLE IF EXISTS query_stats;
         CREATE TABLE query_stats (
