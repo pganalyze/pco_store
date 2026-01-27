@@ -14,7 +14,7 @@ impl CompressedQueryStats {
     /// Loads data for the specified filters.
     pub async fn load(
         db: &deadpool_postgres::Object,
-        filter: Filter,
+        mut filter: Filter,
     ) -> anyhow::Result<Vec<CompressedQueryStats>> {
         let sql = "SELECT * FROM query_stats WHERE true";
         let mut results = Vec::new();
@@ -34,7 +34,7 @@ impl CompressedQueryStats {
     /// Note that all rows are returned from [decompress][Self::decompress] even if post-decompress filters would normally apply.
     pub async fn delete(
         db: &deadpool_postgres::Object,
-        filter: Filter,
+        mut filter: Filter,
     ) -> anyhow::Result<Vec<CompressedQueryStats>> {
         let sql = "DELETE FROM query_stats WHERE true RETURNING *";
         let mut results = Vec::new();

@@ -104,6 +104,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
                 if filter.#ident.is_none() {
                     return Err(anyhow::Error::msg(#name.to_string() + " is required"));
                 }
+                filter.truncate_time_range()?;
             });
             load_where.push(format!("end_at >= ${bind}"));
             bind += 1;
@@ -275,7 +276,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
 
         impl #packed_name {
             /// Loads data for the specified filters.
-            pub async fn load(db: &deadpool_postgres::Object, filter: Filter) -> anyhow::Result<Vec<#packed_name>> {
+            pub async fn load(db: &deadpool_postgres::Object, mut filter: Filter) -> anyhow::Result<Vec<#packed_name>> {
                 #load_checks
                 let sql = #load_sql;
                 let mut results = Vec::new();
@@ -288,7 +289,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
             /// Deletes data for the specified filters, returning it to the caller.
             ///
             /// Note that all rows are returned from [decompress][Self::decompress] even if post-decompress filters would normally apply.
-            pub async fn delete(db: &deadpool_postgres::Object, filter: Filter) -> anyhow::Result<Vec<#packed_name>> {
+            pub async fn delete(db: &deadpool_postgres::Object, mut filter: Filter) -> anyhow::Result<Vec<#packed_name>> {
                 #load_checks
                 let sql = #delete_sql;
                 let mut results = Vec::new();
@@ -439,6 +440,18 @@ fn filter(model: ItemStruct, args: Arguments, using_chrono: bool, timestamp_ty: 
         } else {
             (quote! { std::time::Duration }, quote! { start.duration_since(end)? })
         };
+        let truncate_nanos = if using_chrono {
+            quote! {
+                Ok(chrono::DateTime::from_timestamp_micros(time.timestamp_micros()).context("out of range")?)
+            }
+        } else {
+            quote! {
+                use std::time::{UNIX_EPOCH, Duration};
+                let duration = time.duration_since(UNIX_EPOCH).context("earlier than epoch")?;
+                let micros = duration.as_secs() * 1_000_000 + (duration.subsec_nanos() / 1_000) as u64;
+                Ok(UNIX_EPOCH + Duration::from_secs(micros / 1_000_000) + Duration::from_micros(micros % 1_000_000))
+            }
+        };
         quote! {
             pub fn duration(&self) -> anyhow::Result<#duration_type> {
                 let (start, end) = self.bounds()?;
@@ -459,6 +472,19 @@ fn filter(model: ItemStruct, args: Arguments, using_chrono: bool, timestamp_ty: 
                 let (start, end) = self.bounds()?;
                 self.#timestamp = Some(start.add(duration)..=end.add(duration));
                 Ok(())
+            }
+
+            /// Postgres doesn't support nanosecond precision and nor does MacOS, so this
+            /// truncates nanosecond precision for timestamp comparisons
+            pub fn truncate_time_range(&mut self) -> anyhow::Result<()> {
+                let (start, end) = self.bounds()?;
+                self.#timestamp = Some(Self::truncate_nanos(start)?..=Self::truncate_nanos(end)?);
+                Ok(())
+            }
+
+            pub fn truncate_nanos(time: #timestamp_ty) -> anyhow::Result<#timestamp_ty> {
+                use anyhow::Context;
+                #truncate_nanos
             }
         }
     });

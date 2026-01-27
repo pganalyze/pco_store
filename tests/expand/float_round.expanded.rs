@@ -14,7 +14,7 @@ impl CompressedQueryStats {
     /// Loads data for the specified filters.
     pub async fn load(
         db: &deadpool_postgres::Object,
-        filter: Filter,
+        mut filter: Filter,
     ) -> anyhow::Result<Vec<CompressedQueryStats>> {
         if filter.database_id.is_empty() {
             return Err(anyhow::Error::msg("database_id".to_string() + " is required"));
@@ -40,7 +40,7 @@ impl CompressedQueryStats {
     /// Note that all rows are returned from [decompress][Self::decompress] even if post-decompress filters would normally apply.
     pub async fn delete(
         db: &deadpool_postgres::Object,
-        filter: Filter,
+        mut filter: Filter,
     ) -> anyhow::Result<Vec<CompressedQueryStats>> {
         if filter.database_id.is_empty() {
             return Err(anyhow::Error::msg("database_id".to_string() + " is required"));

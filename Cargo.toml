@@ -27,7 +27,7 @@ syn = "2.0"
 tokio-postgres = { version = "0.7", features = ["with-chrono-0_4"] }
 
 [dev-dependencies]
-chrono = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
 dotenvy = "0.15"
 macrotest = "1.1"
 serial_test = "3.2"

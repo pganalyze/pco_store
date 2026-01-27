@@ -30,7 +30,7 @@ impl CompressedQueryStats {
     /// Loads data for the specified filters.
     pub async fn load(
         db: &deadpool_postgres::Object,
-        filter: Filter,
+        mut filter: Filter,
     ) -> anyhow::Result<Vec<CompressedQueryStats>> {
         if filter.database_id.is_empty() {
             return Err(anyhow::Error::msg("database_id".to_string() + " is required"));
@@ -38,6 +38,7 @@ impl CompressedQueryStats {
         if filter.collected_at.is_none() {
             return Err(anyhow::Error::msg("collected_at".to_string() + " is required"));
         }
+        filter.truncate_time_range()?;
         let sql = "SELECT * FROM query_stats WHERE database_id = ANY($1) AND end_at >= $2 AND start_at <= $3";
         let mut results = Vec::new();
         for row in db
@@ -74,7 +75,7 @@ impl CompressedQueryStats {
     /// Note that all rows are returned from [decompress][Self::decompress] even if post-decompress filters would normally apply.
     pub async fn delete(
         db: &deadpool_postgres::Object,
-        filter: Filter,
+        mut filter: Filter,
     ) -> anyhow::Result<Vec<CompressedQueryStats>> {
         if filter.database_id.is_empty() {
             return Err(anyhow::Error::msg("database_id".to_string() + " is required"));
@@ -82,6 +83,7 @@ impl CompressedQueryStats {
         if filter.collected_at.is_none() {
             return Err(anyhow::Error::msg("collected_at".to_string() + " is required"));
         }
+        filter.truncate_time_range()?;
         let sql = "DELETE FROM query_stats WHERE database_id = ANY($1) AND end_at >= $2 AND start_at <= $3 RETURNING *";
         let mut results = Vec::new();
         for row in db
@@ -1874,6 +1876,22 @@ impl Filter {
         let (start, end) = self.bounds()?;
         self.collected_at = Some(start.add(duration)..=end.add(duration));
         Ok(())
+    }
+    /// Postgres doesn't support nanosecond precision and nor does MacOS, so this
+    /// truncates nanosecond precision for timestamp comparisons
+    pub fn truncate_time_range(&mut self) -> anyhow::Result<()> {
+        let (start, end) = self.bounds()?;
+        self.collected_at = Some(
+            Self::truncate_nanos(start)?..=Self::truncate_nanos(end)?,
+        );
+        Ok(())
+    }
+    pub fn truncate_nanos(time: chrono::DateTime) -> anyhow::Result<chrono::DateTime> {
+        use anyhow::Context;
+        Ok(
+            chrono::DateTime::from_timestamp_micros(time.timestamp_micros())
+                .context("out of range")?,
+        )
     }
 }
 /// Deserializes many different time range formats:
