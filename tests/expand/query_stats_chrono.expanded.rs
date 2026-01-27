@@ -216,8 +216,10 @@ impl CompressedQueryStats {
         for index in 0..len {
             let row = QueryStat {
                 database_id: self.database_id,
-                collected_at: chrono::DateTime::UNIX_EPOCH
-                    + chrono::Duration::microseconds(collected_at[index] as i64),
+                collected_at: chrono::DateTime::from_timestamp_micros(
+                        collected_at[index] as i64,
+                    )
+                    .unwrap(),
                 collected_secs: collected_secs.get(index).cloned().unwrap_or_default(),
                 fingerprint: fingerprint.get(index).cloned().unwrap_or_default(),
                 postgres_role_id: postgres_role_id
@@ -291,12 +293,7 @@ impl CompressedQueryStats {
             let end_at = *collected_at.iter().max().unwrap();
             let collected_at: Vec<u64> = collected_at
                 .into_iter()
-                .map(|t| {
-                    t
-                        .signed_duration_since(chrono::DateTime::UNIX_EPOCH)
-                        .num_microseconds()
-                        .unwrap() as u64
-                })
+                .map(|t| t.timestamp_micros() as u64)
                 .collect();
             writer
                 .as_mut()

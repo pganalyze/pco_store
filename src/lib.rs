@@ -174,7 +174,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
             if timestamp.as_ref().map(|t| *t == ident).unwrap_or(false) {
                 let value = if using_chrono {
                     quote! {
-                        chrono::DateTime::UNIX_EPOCH + chrono::Duration::microseconds(#ident[index] as i64)
+                        chrono::DateTime::from_timestamp_micros(#ident[index] as i64).unwrap()
                     }
                 } else {
                     quote! {
@@ -262,7 +262,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
     let store_group = tokens(store_group);
     let store_values = tokens(store_values);
     let map_inner = if using_chrono {
-        quote! { t.signed_duration_since(chrono::DateTime::UNIX_EPOCH).num_microseconds().unwrap() as u64 }
+        quote! { t.timestamp_micros() as u64 }
     } else {
         quote! { t.duration_since(std::time::SystemTime::UNIX_EPOCH).unwrap().as_micros() as u64 }
     };
