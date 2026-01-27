@@ -4,9 +4,12 @@ use std::collections::hash_map::Entry;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 
+mod chrono_tests;
+
 #[test]
 fn macrotest() {
     macrotest::expand("tests/expand/query_stats.rs");
+    macrotest::expand("tests/expand/query_stats_chrono.rs");
     macrotest::expand("tests/expand/boolean.rs");
     macrotest::expand("tests/expand/no_group_by.rs");
     macrotest::expand("tests/expand/float_round.rs");
