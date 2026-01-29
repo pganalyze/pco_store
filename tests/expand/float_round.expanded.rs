@@ -15,7 +15,7 @@ impl CompressedQueryStats {
     /// For models with a timestamp, [decompress][Self::decompress] automatically filters out
     /// rows outside the requested time range.
     pub async fn load(
-        db: &deadpool_postgres::Object,
+        db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
         database_id: &[i64],
     ) -> anyhow::Result<Vec<CompressedQueryStats>> {
         if database_id.is_empty() {
@@ -40,7 +40,7 @@ impl CompressedQueryStats {
     /// For models with a timestamp, [decompress][Self::decompress] **will not** filter out
     /// rows outside the requested time range.
     pub async fn delete(
-        db: &deadpool_postgres::Object,
+        db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
         database_id: &[i64],
     ) -> anyhow::Result<Vec<CompressedQueryStats>> {
         if database_id.is_empty() {
@@ -89,7 +89,7 @@ impl CompressedQueryStats {
     }
     /// Writes the data to disk.
     pub async fn store(
-        db: &deadpool_postgres::Object,
+        db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
         rows: Vec<QueryStat>,
     ) -> anyhow::Result<()> {
         if rows.is_empty() {
@@ -143,7 +143,7 @@ impl CompressedQueryStats {
     /// This can be used to improve the compression ratio and reduce read IO, for example
     /// by compacting real-time data into a single row per hour / day / week.
     pub async fn store_grouped<F, R>(
-        db: &deadpool_postgres::Object,
+        db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
         rows: Vec<QueryStat>,
         grouping: F,
     ) -> anyhow::Result<()>
