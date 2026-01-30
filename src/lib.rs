@@ -275,7 +275,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
             ///
             /// For models with a timestamp, [decompress][Self::decompress] automatically filters out
             /// rows outside the requested time range.
-            pub async fn load(db: &deadpool_postgres::Object, #load_filters) -> anyhow::Result<Vec<#packed_name>> {
+            pub async fn load(db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>, #load_filters) -> anyhow::Result<Vec<#packed_name>> {
                 #load_checks
                 let sql = #load_sql;
                 let mut results = Vec::new();
@@ -289,7 +289,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
             ///
             /// For models with a timestamp, [decompress][Self::decompress] **will not** filter out
             /// rows outside the requested time range.
-            pub async fn delete(db: &deadpool_postgres::Object, #load_filters) -> anyhow::Result<Vec<#packed_name>> {
+            pub async fn delete(db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>, #load_filters) -> anyhow::Result<Vec<#packed_name>> {
                 #load_checks
                 let sql = #delete_sql;
                 let mut results = Vec::new();
@@ -314,7 +314,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
             }
 
             /// Writes the data to disk.
-            pub async fn store(db: &deadpool_postgres::Object, rows: Vec<#name>) -> anyhow::Result<()> {
+            pub async fn store(db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>, rows: Vec<#name>) -> anyhow::Result<()> {
                 if rows.is_empty() {
                     return Ok(());
                 }
@@ -340,7 +340,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
             /// This can be used to improve the compression ratio and reduce read IO, for example
             /// by compacting real-time data into a single row per hour / day / week.
             pub async fn store_grouped<F, R>(
-                db: &deadpool_postgres::Object,
+                db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
                 rows: Vec<#name>,
                 grouping: F,
             ) -> anyhow::Result<()>
