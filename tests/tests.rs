@@ -4,6 +4,8 @@ use std::collections::hash_map::Entry;
 use std::str::FromStr;
 use std::time::{Duration, SystemTime};
 
+mod chrono_tests;
+
 #[test]
 fn macrotest() {
     macrotest::expand("tests/expand/*.rs");

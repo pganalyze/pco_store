@@ -1,6 +1,6 @@
 use proc_macro::TokenStream;
 use proc_macro2::Span;
-use quote::quote;
+use quote::{ToTokens, quote};
 use syn::parse::{Parse, ParseStream};
 use syn::{Ident, ItemStruct, Lit, Result, Token, Type, bracketed, parse_macro_input};
 
@@ -79,6 +79,8 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
     let mut load_fields = Vec::new();
     let mut bind = 1;
     let mut index: usize = 0;
+    let mut timestamp_ty: Option<_> = None;
+    let mut using_chrono = false;
     for field in model.fields.iter() {
         let ident = field.ident.clone().unwrap();
         let ty = field.ty.clone();
@@ -95,12 +97,14 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
             bind += 1;
             load_params.push(quote! { &#ident, });
         } else if timestamp.as_ref().map(|t| *t == ident).unwrap_or(false) {
+            timestamp_ty = Some(ty.clone());
+            using_chrono = !ty.to_token_stream().to_string().contains("SystemTime");
             fields.push(quote! {
                 pub filter: bool,
-                pub filter_start: SystemTime,
-                pub filter_end: SystemTime,
-                pub start_at: SystemTime,
-                pub end_at: SystemTime,
+                pub filter_start: #ty,
+                pub filter_end: #ty,
+                pub start_at: #ty,
+                pub end_at: #ty,
                 #ident: Vec<u8>,
             });
             load_where.push(format!("end_at >= ${bind}"));
@@ -122,9 +126,10 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
     }
     let mut delete_fields = load_fields.clone();
     if timestamp.is_some() {
+        let ty = timestamp_ty.unwrap_or_else(|| Type::Verbatim(quote! { std::time::SystemTime }));
         load_filters.push(quote! {
-            filter_start: SystemTime,
-            filter_end: SystemTime,
+            filter_start: #ty,
+            filter_end: #ty,
         });
         load_fields.push(quote! { filter: true, filter_start, filter_end, });
         delete_fields.push(quote! { filter: false, filter_start, filter_end, });
@@ -169,8 +174,17 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
             });
             compressed_field_sizes.push(quote! { #ident.len(), });
             if timestamp.as_ref().map(|t| *t == ident).unwrap_or(false) {
+                let value = if using_chrono {
+                    quote! {
+                        chrono::DateTime::from_timestamp_micros(#ident[index] as i64).unwrap()
+                    }
+                } else {
+                    quote! {
+                        std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_micros(#ident[index])
+                    }
+                };
                 decompressed_fields.push(quote! {
-                    #ident: SystemTime::UNIX_EPOCH + std::time::Duration::from_micros(#ident[index]),
+                    #ident: #value,
                 });
             } else if round_float_field {
                 decompressed_fields.push(quote! {
@@ -249,13 +263,18 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
     let store_types = tokens(store_types.into_iter().map(|t| quote! { tokio_postgres::types::Type::#t, }).collect());
     let store_group = tokens(store_group);
     let store_values = tokens(store_values);
+    let map_inner = if using_chrono {
+        quote! { t.timestamp_micros() as u64 }
+    } else {
+        quote! { t.duration_since(std::time::SystemTime::UNIX_EPOCH).unwrap().as_micros() as u64 }
+    };
     let timestamp_collect = if timestamp.is_some() {
         quote! {
             let #timestamp: Vec<_> = rows.iter().map(|s| s.#timestamp).collect();
             let start_at = *#timestamp.iter().min().unwrap();
             let end_at = *#timestamp.iter().max().unwrap();
             let #timestamp: Vec<u64> = #timestamp.into_iter().map(|t|
-                t.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_micros() as u64).collect();
+                #map_inner).collect();
         }
     } else {
         quote! {}
