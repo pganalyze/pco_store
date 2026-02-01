@@ -1,6 +1,6 @@
 pub struct QueryStat {
     pub database_id: i64,
-    pub collected_at: SystemTime,
+    pub collected_at: chrono::DateTime,
     pub collected_secs: i64,
     pub fingerprint: i64,
     pub postgres_role_id: i64,
@@ -15,10 +15,10 @@ pub struct QueryStat {
 pub struct CompressedQueryStats {
     pub database_id: i64,
     pub filter: bool,
-    pub filter_start: SystemTime,
-    pub filter_end: SystemTime,
-    pub start_at: SystemTime,
-    pub end_at: SystemTime,
+    pub filter_start: chrono::DateTime,
+    pub filter_end: chrono::DateTime,
+    pub start_at: chrono::DateTime,
+    pub end_at: chrono::DateTime,
     collected_at: Vec<u8>,
     collected_secs: Vec<u8>,
     fingerprint: Vec<u8>,
@@ -38,8 +38,8 @@ impl CompressedQueryStats {
     pub async fn load(
         db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
         database_id: &[i64],
-        filter_start: SystemTime,
-        filter_end: SystemTime,
+        filter_start: chrono::DateTime,
+        filter_end: chrono::DateTime,
     ) -> anyhow::Result<Vec<CompressedQueryStats>> {
         if database_id.is_empty() {
             return Err(
@@ -84,8 +84,8 @@ impl CompressedQueryStats {
     pub async fn delete(
         db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
         database_id: &[i64],
-        filter_start: SystemTime,
-        filter_end: SystemTime,
+        filter_start: chrono::DateTime,
+        filter_end: chrono::DateTime,
     ) -> anyhow::Result<Vec<CompressedQueryStats>> {
         if database_id.is_empty() {
             return Err(
@@ -194,8 +194,10 @@ impl CompressedQueryStats {
         for index in 0..len {
             let row = QueryStat {
                 database_id: self.database_id,
-                collected_at: std::time::SystemTime::UNIX_EPOCH
-                    + std::time::Duration::from_micros(collected_at[index]),
+                collected_at: chrono::DateTime::from_timestamp_micros(
+                        collected_at[index] as i64,
+                    )
+                    .unwrap(),
                 collected_secs: collected_secs.get(index).cloned().unwrap_or_default(),
                 fingerprint: fingerprint.get(index).cloned().unwrap_or_default(),
                 postgres_role_id: postgres_role_id
@@ -262,12 +264,7 @@ impl CompressedQueryStats {
             let end_at = *collected_at.iter().max().unwrap();
             let collected_at: Vec<u64> = collected_at
                 .into_iter()
-                .map(|t| {
-                    t
-                        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                        .unwrap()
-                        .as_micros() as u64
-                })
+                .map(|t| t.timestamp_micros() as u64)
                 .collect();
             writer
                 .as_mut()
@@ -388,12 +385,7 @@ impl CompressedQueryStats {
             let end_at = *collected_at.iter().max().unwrap();
             let collected_at: Vec<u64> = collected_at
                 .into_iter()
-                .map(|t| {
-                    t
-                        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                        .unwrap()
-                        .as_micros() as u64
-                })
+                .map(|t| t.timestamp_micros() as u64)
                 .collect();
             writer
                 .as_mut()
