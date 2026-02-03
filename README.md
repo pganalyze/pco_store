@@ -170,14 +170,18 @@ Timestamps are accepted as an inclusive range (with precision automatically trun
 
 ### Creating a filter
 
-`Filter::new()` is a shorthand to set the required fields from `group_by` and `timestamp`. After it's created, additional filters can be set as fields on the struct. Struct literal syntax can also be used: `Filter { field: [1], ..Filter::default() }`
+- `Filter::new()` is a shorthand to set the required fields from `group_by` and `timestamp`
+- Optional filters can be set as fields on the struct: `filter.fingerprint = vec![1]`
+- Struct literal syntax can also be used: `Filter { fingerprint: vec![1], ..Filter::default() }`
 
-Filters can be deserialized using serde. Non-timestamp fields can be passed as a single JSON value which is automatically wrapped in an array.
+### Filter deserialization using serde
+
+Non-timestamp fields can be passed either as an array, or as a single value which is automatically wrapped in an array.
 
 Timestamps support multiple formats:
-- `["ts1", "ts2"]`: an array with two timestamp strings becomes an inclusive range `ts1..=ts2`
-- `["ts1"]`: an array with a single timestamp string becomes an inclusive range `ts1..=ts1`
-- `"ts1"`: a single timestamp string becomes an inclusive range `ts1..=ts1`
+- `["ts1", "ts2"]`: an array with two timestamps becomes an inclusive range `ts1..=ts2`
+- `["ts1"]`: an array with a single timestamp becomes an inclusive range `ts1..=ts1`
+- `"ts1"`: a single timestamp becomes an inclusive range `ts1..=ts1`
 
 ### Filter convenience functions
 
