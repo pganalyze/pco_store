@@ -104,7 +104,7 @@ async fn test() -> anyhow::Result<()> {
 
 async fn load(db: &deadpool_postgres::Client, filter: Filter) -> anyhow::Result<Vec<QueryStat>> {
     let mut rows = Vec::new();
-    for group in CompressedQueryStats::load(db, filter).await? {
+    for group in CompressedQueryStats::load(db, filter, ()).await? {
         rows.extend(group.decompress()?);
     }
     rows.sort_by_key(|s| (s.fingerprint, s.collected_at));
@@ -113,7 +113,7 @@ async fn load(db: &deadpool_postgres::Client, filter: Filter) -> anyhow::Result<
 
 async fn delete(db: &deadpool_postgres::Client, filter: Filter) -> anyhow::Result<Vec<QueryStat>> {
     let mut rows = Vec::new();
-    for group in CompressedQueryStats::delete(db, filter).await? {
+    for group in CompressedQueryStats::delete(db, filter, ()).await? {
         rows.extend(group.decompress()?);
     }
     rows.sort_by_key(|s| (s.fingerprint, s.collected_at));

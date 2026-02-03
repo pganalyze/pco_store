@@ -91,7 +91,7 @@ pub async fn load() -> Result<()> {
     let database_ids: Vec<i64> = db.query_one("SELECT array_agg(DISTINCT database_id) FROM comparison_pco_stores", &[]).await?.get(0);
     let mut stats = Vec::new();
     let filter = Filter::new(&database_ids, SystemTime::UNIX_EPOCH..=SystemTime::now());
-    for group in CompressedQueryStats::load(db, filter).await? {
+    for group in CompressedQueryStats::load(db, filter, ()).await? {
         for stat in group.decompress()? {
             stats.push(stat);
         }

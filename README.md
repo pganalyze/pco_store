@@ -94,7 +94,7 @@ async fn example() -> anyhow::Result<()> {
     // Read
     let mut calls = 0;
     let filter = Filter::new(&[database_id], &[granularity], start..=end);
-    for group in CompressedQueryStats::load(db, filter.clone()).await? {
+    for group in CompressedQueryStats::load(db, filter.clone(), ()).await? {
         for stat in group.decompress()? {
             calls += stat.calls;
         }
@@ -106,7 +106,7 @@ async fn example() -> anyhow::Result<()> {
     assert_eq!(2, db.query_one("SELECT count(*) FROM query_stats", &[]).await?.get::<_, i64>(0));
     transaction!(db, {
         let mut stats = Vec::new();
-        for group in CompressedQueryStats::delete(db, filter.clone()).await? {
+        for group in CompressedQueryStats::delete(db, filter.clone(), ()).await? {
             stats.extend(group.decompress()?);
         }
         assert_eq!(0, db.query_one("SELECT count(*) FROM query_stats", &[]).await?.get::<_, i64>(0));
@@ -117,7 +117,7 @@ async fn example() -> anyhow::Result<()> {
         .await?;
     });
     assert_eq!(1, db.query_one("SELECT count(*) FROM query_stats", &[]).await?.get::<_, i64>(0));
-    let group = CompressedQueryStats::load(db, filter).await?.remove(0);
+    let group = CompressedQueryStats::load(db, filter, ()).await?.remove(0);
     assert_eq!(group.start_at, end - Duration::from_secs(120));
     assert_eq!(group.end_at, end - Duration::from_secs(60));
     let stats = group.decompress()?;
@@ -188,6 +188,15 @@ Timestamps support multiple formats:
 - `range_bounds` returns the time range lower and upper bounds
 - `range_duration` returns the duration of the filter's time range
 - `range_shift` mutably shifts the time range's start and end by a certain amount, e.g. to filter for "today, 7 days ago"
+
+## Loading a subset of fields
+
+Read requests that don't need all fields in a struct can be optimized by declaring which fields they need, allowing pco_store to skip the others. Fields can be specified in several ways:
+- `()` or `Fields::default()`: load all fields
+- `[]` or `Fields::required()`: load only the required fields from `group_by` and `timestamp`
+- `["other"]` or `Fields::new(["other"])`: load extra fields in addition to the required ones
+
+Note that when optional filters are combined with `Fields::required()`, the fields needed by those filters are automatically added to the fields to be loaded.
 
 ## Contributions are welcome to
 

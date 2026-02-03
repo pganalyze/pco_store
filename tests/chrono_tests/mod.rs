@@ -47,7 +47,7 @@ async fn systemtime_chrono_interop() {
     {
         let mut actual: Vec<QueryStat> = vec![];
         let filter = Filter::new(&[database_id], start.into()..=end.into());
-        for group in CompressedQueryStats::load(db, filter).await.unwrap() {
+        for group in CompressedQueryStats::load(db, filter, ()).await.unwrap() {
             for stat in group.decompress().unwrap() {
                 actual.push(stat.clone());
             }
@@ -70,7 +70,7 @@ async fn systemtime_chrono_interop() {
         // Read, using chrono::DateTime.
         let mut actual: Vec<QueryStat> = vec![];
         let filter = Filter::new(&[database_id], start..=end);
-        for group in CompressedQueryStats::load(db, filter).await.unwrap() {
+        for group in CompressedQueryStats::load(db, filter, ()).await.unwrap() {
             for stat in group.decompress().unwrap() {
                 actual.push(stat.clone());
             }
@@ -90,7 +90,7 @@ async fn systemtime_chrono_interop() {
     // Read again, using SystemTime.
     let mut actual: Vec<QueryStat> = vec![];
     let filter = Filter::new(&[database_id], start.into()..=end.into());
-    for group in CompressedQueryStats::load(db, filter).await.unwrap() {
+    for group in CompressedQueryStats::load(db, filter, ()).await.unwrap() {
         for stat in group.decompress().unwrap() {
             actual.push(stat.clone());
         }
