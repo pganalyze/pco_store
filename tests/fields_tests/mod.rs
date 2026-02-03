@@ -2,7 +2,7 @@ use anyhow::Context;
 use chrono::{DateTime, Utc};
 
 #[pco_store::store(timestamp = collected_at, group_by = [database_id, granularity])]
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct QueryStat {
     pub database_id: i64,
     pub granularity: i32,
@@ -46,7 +46,7 @@ async fn test() -> anyhow::Result<()> {
     let mut stats = Vec::new();
     stats.push(QueryStat { fingerprint: 1, ..s });
     stats.push(QueryStat { fingerprint: 2, ..s });
-    CompressedQueryStats::store(db, stats).await?;
+    CompressedQueryStats::store(db, stats.clone()).await?;
 
     // Including all fields
     let full = vec![QueryStat { fingerprint: 1, ..s }, QueryStat { fingerprint: 2, ..s }];
@@ -69,12 +69,26 @@ async fn test() -> anyhow::Result<()> {
     f.fingerprint = vec![2];
     assert_eq!(vec![QueryStat { fingerprint: 2, ..s }], load(db, f.clone(), &[]).await?);
 
+    // Fields can be skipped skipped when deleting rows
+    assert_eq!(partial, delete(db, filter.clone(), &[]).await?);
+    CompressedQueryStats::store(db, stats).await?;
+    assert_eq!(full, delete(db, filter.clone(), ()).await?);
+
     Ok(())
 }
 
 async fn load(db: &deadpool_postgres::Client, filter: Filter, fields: impl TryInto<Fields>) -> anyhow::Result<Vec<QueryStat>> {
     let mut rows = Vec::new();
     for group in CompressedQueryStats::load(db, filter, fields).await? {
+        rows.extend(group.decompress()?);
+    }
+    rows.sort_by_key(|s| (s.fingerprint, s.collected_at));
+    Ok(rows)
+}
+
+async fn delete(db: &deadpool_postgres::Client, filter: Filter, fields: impl TryInto<Fields>) -> anyhow::Result<Vec<QueryStat>> {
+    let mut rows = Vec::new();
+    for group in CompressedQueryStats::delete(db, filter, fields).await? {
         rows.extend(group.decompress()?);
     }
     rows.sort_by_key(|s| (s.fingerprint, s.collected_at));
