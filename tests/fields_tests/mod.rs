@@ -69,7 +69,7 @@ async fn test() -> anyhow::Result<()> {
     f.fingerprint = vec![2];
     assert_eq!(vec![QueryStat { fingerprint: 2, ..s }], load(db, f.clone(), &[]).await?);
 
-    // Fields can be skipped skipped when deleting rows
+    // Fields can be skipped when deleting rows
     assert_eq!(partial, delete(db, filter.clone(), &[]).await?);
     CompressedQueryStats::store(db, stats).await?;
     assert_eq!(full, delete(db, filter.clone(), ()).await?);
