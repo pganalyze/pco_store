@@ -6,7 +6,7 @@ fn ymd_hms_micros(year: i32, month: u32, day: u32, hour: u32, min: u32, sec: u32
 }
 
 #[pco_store::store(timestamp = collected_at, group_by = [database_id, granularity])]
-#[derive(Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct QueryStat {
     pub database_id: i64,
     pub granularity: i32,
@@ -30,6 +30,17 @@ async fn test() -> anyhow::Result<()> {
     assert_eq!(filter.collected_at, Some(s..=e));
     filter.range_truncate()?;
     assert_eq!(filter.collected_at, Some(start..=end));
+
+    // Convenience functions
+    let t = DateTime::from_timestamp_micros(Utc::now().timestamp_micros()).context("out of range")?;
+    let t2 = t + Duration::seconds(1);
+    let mut filter = Filter::new(&[], &[], t..=t2);
+    assert_eq!(filter.range_duration()?, Duration::seconds(1));
+    assert_eq!(filter.range_bounds()?, (t, t2));
+    filter.range_shift(Duration::days(1))?;
+    assert_eq!(filter.range_bounds()?, (t + Duration::days(1), t2 + Duration::days(1)));
+    filter.range_shift(Duration::days(-2))?;
+    assert_eq!(filter.range_bounds()?, (t - Duration::days(1), t2 - Duration::days(1)));
 
     // Deserialization
     let filter: Filter =
@@ -62,36 +73,31 @@ async fn test() -> anyhow::Result<()> {
     db.batch_execute(sql).await?;
 
     let mut stats = Vec::new();
-    let t = DateTime::from_timestamp_micros(Utc::now().timestamp_micros()).context("out of range")?;
-    let t2 = t + Duration::microseconds(1);
     let s = QueryStat { database_id: 5, granularity: 60, collected_at: t, fingerprint: 0 };
     stats.push(QueryStat { fingerprint: 1, ..s });
     stats.push(QueryStat { fingerprint: 2, ..s });
     stats.push(QueryStat { fingerprint: 3, collected_at: t2, ..s });
-    CompressedQueryStats::store(db, stats).await?;
+    CompressedQueryStats::store(db, stats.clone()).await?;
 
-    // Filtering by a single timestamp works
+    // Filtering by a single timestamp
     let actual = load(db, Filter::new(&[5], &[60], t..=t)).await?;
-    #[rustfmt::skip]
-    assert_eq!(actual, vec![
-        QueryStat { fingerprint: 1, ..s },
-        QueryStat { fingerprint: 2, ..s },
-    ]);
+    assert_eq!(actual, vec![QueryStat { fingerprint: 1, ..s }, QueryStat { fingerprint: 2, ..s },]);
 
-    // Changing the timestamp filter to cover the whole time range works
+    // Filtering the whole time range
     let actual = load(db, Filter::new(&[5], &[60], t..=t2)).await?;
-    #[rustfmt::skip]
-    assert_eq!(actual, vec![
-        QueryStat { fingerprint: 1, ..s },
-        QueryStat { fingerprint: 2, ..s },
-        QueryStat { fingerprint: 3, collected_at: t2, ..s },
-    ]);
+    assert_eq!(actual, stats);
 
-    // Optional filter works
+    // Optional filter
     let mut filter = Filter::new(&[5], &[60], t..=t2);
     filter.fingerprint = vec![2];
     let actual = load(db, filter).await?;
     assert_eq!(actual, vec![QueryStat { fingerprint: 2, ..s }]);
+
+    // Optional filter is not applied to deleted rows
+    let mut filter = Filter::new(&[5], &[60], t..=t2);
+    filter.fingerprint = vec![2];
+    let actual = delete(db, filter).await?;
+    assert_eq!(actual, stats);
 
     Ok(())
 }
@@ -99,6 +105,15 @@ async fn test() -> anyhow::Result<()> {
 async fn load(db: &deadpool_postgres::Client, filter: Filter) -> anyhow::Result<Vec<QueryStat>> {
     let mut rows = Vec::new();
     for group in CompressedQueryStats::load(db, filter).await? {
+        rows.extend(group.decompress()?);
+    }
+    rows.sort_by_key(|s| (s.fingerprint, s.collected_at));
+    Ok(rows)
+}
+
+async fn delete(db: &deadpool_postgres::Client, filter: Filter) -> anyhow::Result<Vec<QueryStat>> {
+    let mut rows = Vec::new();
+    for group in CompressedQueryStats::delete(db, filter).await? {
         rows.extend(group.decompress()?);
     }
     rows.sort_by_key(|s| (s.fingerprint, s.collected_at));

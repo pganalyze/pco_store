@@ -438,7 +438,7 @@ fn filter(model: ItemStruct, args: Arguments, using_chrono: bool, timestamp_ty: 
         let (duration_type, duration_math) = if using_chrono {
             (quote! { chrono::Duration }, quote! { end - start })
         } else {
-            (quote! { std::time::Duration }, quote! { start.duration_since(end)? })
+            (quote! { std::time::Duration }, quote! { end.duration_since(start)? })
         };
         let truncate_nanos = if using_chrono {
             quote! {

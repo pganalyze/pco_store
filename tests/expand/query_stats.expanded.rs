@@ -1884,7 +1884,7 @@ impl Filter {
     /// Convenience function to return the amount of time the filter covers
     pub fn range_duration(&self) -> anyhow::Result<std::time::Duration> {
         let (start, end) = self.range_bounds()?;
-        Ok(start.duration_since(end)?)
+        Ok(end.duration_since(start)?)
     }
     /// Shifts the filtered time range. This for example makes it easier
     /// to perform two queries: once for "today", and one for "today, 7 days ago".
