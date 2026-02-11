@@ -1,9 +1,7 @@
 use chrono::{DateTime, Utc};
 use uuid::Uuid;
 
-// Confirms that UUID and String types can be used in `group_by`
-
-#[pco_store::store(timestamp = collected_at, group_by = [server_id, granularity, mountpoint], float_round = 2)]
+#[pco_store::store(timestamp = collected_at, group_by = [server_id, granularity], float_round = 2)]
 pub struct SystemStorageStat {
     pub server_id: Uuid,
     pub granularity: i32,

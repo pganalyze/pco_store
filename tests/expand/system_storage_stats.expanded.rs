@@ -17,7 +17,7 @@ pub struct CompressedSystemStorageStats {
     filter: Option<Filter>,
     server_id: Uuid,
     granularity: i32,
-    mountpoint: String,
+    mountpoint: Vec<u8>,
     collected_at: Vec<u8>,
     bytes_available: Vec<u8>,
     bytes_total: Vec<u8>,
@@ -42,16 +42,13 @@ impl CompressedSystemStorageStats {
         if filter.granularity.is_empty() {
             return Err(anyhow::Error::msg("granularity".to_string() + " is required"));
         }
-        if filter.mountpoint.is_empty() {
-            return Err(anyhow::Error::msg("mountpoint".to_string() + " is required"));
-        }
         if filter.collected_at.is_none() {
             return Err(anyhow::Error::msg("collected_at".to_string() + " is required"));
         }
         filter.range_truncate()?;
         let sql = "SELECT ".to_string() + fields.select().as_str() + " FROM "
             + "system_storage_stats" + " WHERE "
-            + "server_id = ANY($1) AND granularity = ANY($2) AND mountpoint = ANY($3) AND end_at >= $4 AND start_at <= $5";
+            + "server_id = ANY($1) AND granularity = ANY($2) AND end_at >= $3 AND start_at <= $4";
         let mut results = Vec::new();
         for row in db
             .query(
@@ -59,7 +56,6 @@ impl CompressedSystemStorageStats {
                 &[
                     &filter.server_id,
                     &filter.granularity,
-                    &filter.mountpoint,
                     filter.collected_at.as_ref().unwrap().start(),
                     filter.collected_at.as_ref().unwrap().end(),
                 ],
@@ -88,15 +84,12 @@ impl CompressedSystemStorageStats {
         if filter.granularity.is_empty() {
             return Err(anyhow::Error::msg("granularity".to_string() + " is required"));
         }
-        if filter.mountpoint.is_empty() {
-            return Err(anyhow::Error::msg("mountpoint".to_string() + " is required"));
-        }
         if filter.collected_at.is_none() {
             return Err(anyhow::Error::msg("collected_at".to_string() + " is required"));
         }
         filter.range_truncate()?;
         let sql = "DELETE FROM ".to_string() + "system_storage_stats" + " WHERE "
-            + "server_id = ANY($1) AND granularity = ANY($2) AND mountpoint = ANY($3) AND end_at >= $4 AND start_at <= $5"
+            + "server_id = ANY($1) AND granularity = ANY($2) AND end_at >= $3 AND start_at <= $4"
             + " RETURNING " + fields.select().as_str();
         let mut results = Vec::new();
         for row in db
@@ -105,7 +98,6 @@ impl CompressedSystemStorageStats {
                 &[
                     &filter.server_id,
                     &filter.granularity,
-                    &filter.mountpoint,
                     filter.collected_at.as_ref().unwrap().start(),
                     filter.collected_at.as_ref().unwrap().end(),
                 ],
@@ -118,7 +110,20 @@ impl CompressedSystemStorageStats {
     }
     /// Decompresses a group of data points.
     pub fn decompress(self) -> anyhow::Result<Vec<SystemStorageStat>> {
+        use anyhow::Context;
         let mut results = Vec::new();
+        let mountpoint: Vec<String> = if self.mountpoint.is_empty() {
+            Vec::new()
+        } else {
+            {
+                let cursor = std::io::Cursor::new(&self.mountpoint);
+                let mut decoder = zeekstd::Decoder::new(cursor)
+                    .context("zeekstd::Decoder")?;
+                let mut bytes = Vec::new();
+                std::io::copy(&mut decoder, &mut bytes).context("io::copy")?;
+                serde_brief::from_slice(&bytes).context("serde_brief::from_slice")?
+            }
+        };
         let collected_at: Vec<u64> = if self.collected_at.is_empty() {
             Vec::new()
         } else {
@@ -150,6 +155,7 @@ impl CompressedSystemStorageStats {
             ::pco::standalone::simple_decompress(&self.write_latency)?
         };
         let len = [
+            mountpoint.len(),
             collected_at.len(),
             bytes_available.len(),
             bytes_total.len(),
@@ -164,7 +170,7 @@ impl CompressedSystemStorageStats {
             let row = SystemStorageStat {
                 server_id: self.server_id.clone(),
                 granularity: self.granularity.clone(),
-                mountpoint: self.mountpoint.clone(),
+                mountpoint: mountpoint.get(index).cloned().unwrap_or_default(),
                 collected_at: chrono::DateTime::from_timestamp_micros(
                         collected_at[index] as i64,
                     )
@@ -188,17 +194,14 @@ impl CompressedSystemStorageStats {
         db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
         rows: Vec<SystemStorageStat>,
     ) -> anyhow::Result<()> {
+        use anyhow::Context;
         if rows.is_empty() {
             return Ok(());
         }
         let mut grouped_rows: ahash::AHashMap<_, Vec<SystemStorageStat>> = ahash::AHashMap::new();
         for row in rows {
             grouped_rows
-                .entry((
-                    row.server_id.clone(),
-                    row.granularity.clone(),
-                    row.mountpoint.clone(),
-                ))
+                .entry((row.server_id.clone(), row.granularity.clone()))
                 .or_default()
                 .push(row);
         }
@@ -206,7 +209,7 @@ impl CompressedSystemStorageStats {
         let types = &[
             tokio_postgres::types::Type::UUID,
             tokio_postgres::types::Type::INT4,
-            tokio_postgres::types::Type::TEXT,
+            tokio_postgres::types::Type::BYTEA,
             tokio_postgres::types::Type::TIMESTAMPTZ,
             tokio_postgres::types::Type::TIMESTAMPTZ,
             tokio_postgres::types::Type::BYTEA,
@@ -237,7 +240,24 @@ impl CompressedSystemStorageStats {
                     &[
                         &rows[0].server_id,
                         &rows[0].granularity,
-                        &rows[0].mountpoint,
+                        &{
+                            use std::io::Write;
+                            let bytes = serde_brief::to_vec(
+                                    &rows
+                                        .iter()
+                                        .map(|r| r.mountpoint.clone())
+                                        .collect::<Vec<_>>(),
+                                )
+                                .context("serde_brief::to_slice")?;
+                            let mut compressed_bytes = Vec::new();
+                            let mut encoder = zeekstd::Encoder::new(
+                                    &mut compressed_bytes,
+                                )
+                                .context("zeekstd::Encoder")?;
+                            encoder.write_all(&bytes).context("encoder.write_all")?;
+                            encoder.finish().context("encoder.finish")?;
+                            compressed_bytes
+                        },
                         &start_at,
                         &end_at,
                         &::pco::standalone::simpler_compress(
@@ -246,36 +266,31 @@ impl CompressedSystemStorageStats {
                             )
                             .unwrap(),
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.bytes_available).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.bytes_available).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.bytes_total).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.bytes_total).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.queue_depth).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.queue_depth).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows
-                                    .iter()
-                                    .map(|r| (r.read_latency * 100f32 as f64).round() as i64)
-                                    .collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows
+                                .iter()
+                                .map(|r| (r.read_latency * 100f32 as f64).round() as i64)
+                                .collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows
-                                    .iter()
-                                    .map(|r| (r.write_latency * 100f32 as f64).round() as i64)
-                                    .collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows
+                                .iter()
+                                .map(|r| (r.write_latency * 100f32 as f64).round() as i64)
+                                .collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                     ],
                 )
                 .await?;
@@ -296,18 +311,14 @@ impl CompressedSystemStorageStats {
         F: Fn(&SystemStorageStat) -> R,
         R: Eq + std::hash::Hash,
     {
+        use anyhow::Context;
         if rows.is_empty() {
             return Ok(());
         }
         let mut grouped_rows: ahash::AHashMap<_, Vec<SystemStorageStat>> = ahash::AHashMap::new();
         for row in rows {
             grouped_rows
-                .entry((
-                    row.server_id.clone(),
-                    row.granularity.clone(),
-                    row.mountpoint.clone(),
-                    grouping(&row),
-                ))
+                .entry((row.server_id.clone(), row.granularity.clone(), grouping(&row)))
                 .or_default()
                 .push(row);
         }
@@ -315,7 +326,7 @@ impl CompressedSystemStorageStats {
         let types = &[
             tokio_postgres::types::Type::UUID,
             tokio_postgres::types::Type::INT4,
-            tokio_postgres::types::Type::TEXT,
+            tokio_postgres::types::Type::BYTEA,
             tokio_postgres::types::Type::TIMESTAMPTZ,
             tokio_postgres::types::Type::TIMESTAMPTZ,
             tokio_postgres::types::Type::BYTEA,
@@ -346,7 +357,24 @@ impl CompressedSystemStorageStats {
                     &[
                         &rows[0].server_id,
                         &rows[0].granularity,
-                        &rows[0].mountpoint,
+                        &{
+                            use std::io::Write;
+                            let bytes = serde_brief::to_vec(
+                                    &rows
+                                        .iter()
+                                        .map(|r| r.mountpoint.clone())
+                                        .collect::<Vec<_>>(),
+                                )
+                                .context("serde_brief::to_slice")?;
+                            let mut compressed_bytes = Vec::new();
+                            let mut encoder = zeekstd::Encoder::new(
+                                    &mut compressed_bytes,
+                                )
+                                .context("zeekstd::Encoder")?;
+                            encoder.write_all(&bytes).context("encoder.write_all")?;
+                            encoder.finish().context("encoder.finish")?;
+                            compressed_bytes
+                        },
                         &start_at,
                         &end_at,
                         &::pco::standalone::simpler_compress(
@@ -355,36 +383,31 @@ impl CompressedSystemStorageStats {
                             )
                             .unwrap(),
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.bytes_available).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.bytes_available).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.bytes_total).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.bytes_total).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.queue_depth).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.queue_depth).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows
-                                    .iter()
-                                    .map(|r| (r.read_latency * 100f32 as f64).round() as i64)
-                                    .collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows
+                                .iter()
+                                .map(|r| (r.read_latency * 100f32 as f64).round() as i64)
+                                .collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows
-                                    .iter()
-                                    .map(|r| (r.write_latency * 100f32 as f64).round() as i64)
-                                    .collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows
+                                .iter()
+                                .map(|r| (r.write_latency * 100f32 as f64).round() as i64)
+                                .collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                     ],
                 )
                 .await?;
@@ -1571,13 +1594,11 @@ impl Filter {
     pub fn new(
         server_id: &[Uuid],
         granularity: &[i32],
-        mountpoint: &[String],
         collected_at: std::ops::RangeInclusive<DateTime<Utc>>,
     ) -> Self {
         Self {
             server_id: server_id.into(),
             granularity: granularity.into(),
-            mountpoint: mountpoint.into(),
             collected_at: Some(collected_at),
             ..Self::default()
         }
@@ -1715,7 +1736,7 @@ impl Fields {
         Self {
             server_id: true,
             granularity: true,
-            mountpoint: true,
+            mountpoint: false,
             collected_at: true,
             bytes_available: false,
             bytes_total: false,
@@ -1725,6 +1746,7 @@ impl Fields {
         }
     }
     fn merge_filter(&mut self, filter: &Filter) {
+        (!filter.mountpoint.is_empty()).then(|| self.mountpoint = true);
         (!filter.bytes_available.is_empty()).then(|| self.bytes_available = true);
         (!filter.bytes_total.is_empty()).then(|| self.bytes_total = true);
         (!filter.queue_depth.is_empty()).then(|| self.queue_depth = true);

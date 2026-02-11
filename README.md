@@ -17,7 +17,14 @@ pco_store extends that with support for:
 - `chrono::DateTime`, `std::time::SystemTime`
 - `bool`
 - `uuid::Uuid` (only as a `group_by` field)
-- `String` (only as a `group_by` field)
+- `String`
+
+For binary types like `String`, additional dependencies are needed:
+
+```toml
+serde-brief = { version = "0.2", features = ["alloc"] }
+zeekstd = "0.6"
+```
 
 ## Performance
 

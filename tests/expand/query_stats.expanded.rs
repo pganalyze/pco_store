@@ -104,6 +104,7 @@ impl CompressedQueryStats {
     }
     /// Decompresses a group of data points.
     pub fn decompress(self) -> anyhow::Result<Vec<QueryStat>> {
+        use anyhow::Context;
         let mut results = Vec::new();
         let collected_at: Vec<u64> = if self.collected_at.is_empty() {
             Vec::new()
@@ -202,6 +203,7 @@ impl CompressedQueryStats {
         db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
         rows: Vec<QueryStat>,
     ) -> anyhow::Result<()> {
+        use anyhow::Context;
         if rows.is_empty() {
             return Ok(());
         }
@@ -258,56 +260,41 @@ impl CompressedQueryStats {
                             )
                             .unwrap(),
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.collected_secs).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.collected_secs).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.fingerprint).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.fingerprint).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows
-                                    .iter()
-                                    .map(|r| r.postgres_role_id)
-                                    .collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.postgres_role_id).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.calls).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.calls).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.rows).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.rows).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.total_time).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.total_time).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.io_time).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.io_time).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.shared_blks_hit).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.shared_blks_hit).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows
-                                    .iter()
-                                    .map(|r| r.shared_blks_read)
-                                    .collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.shared_blks_read).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                     ],
                 )
                 .await?;
@@ -328,6 +315,7 @@ impl CompressedQueryStats {
         F: Fn(&QueryStat) -> R,
         R: Eq + std::hash::Hash,
     {
+        use anyhow::Context;
         if rows.is_empty() {
             return Ok(());
         }
@@ -387,56 +375,41 @@ impl CompressedQueryStats {
                             )
                             .unwrap(),
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.collected_secs).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.collected_secs).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.fingerprint).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.fingerprint).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows
-                                    .iter()
-                                    .map(|r| r.postgres_role_id)
-                                    .collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.postgres_role_id).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.calls).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.calls).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.rows).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.rows).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.total_time).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.total_time).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.io_time).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.io_time).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.shared_blks_hit).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.shared_blks_hit).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows
-                                    .iter()
-                                    .map(|r| r.shared_blks_read)
-                                    .collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.shared_blks_read).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                     ],
                 )
                 .await?;

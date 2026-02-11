@@ -64,6 +64,7 @@ impl CompressedQueryStats {
     }
     /// Decompresses a group of data points.
     pub fn decompress(self) -> anyhow::Result<Vec<QueryStat>> {
+        use anyhow::Context;
         let mut results = Vec::new();
         let calls: Vec<i64> = if self.calls.is_empty() {
             Vec::new()
@@ -94,6 +95,7 @@ impl CompressedQueryStats {
         db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
         rows: Vec<QueryStat>,
     ) -> anyhow::Result<()> {
+        use anyhow::Context;
         if rows.is_empty() {
             return Ok(());
         }
@@ -121,18 +123,16 @@ impl CompressedQueryStats {
                     &[
                         &rows[0].database_id,
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.calls).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.calls).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows
-                                    .iter()
-                                    .map(|r| (r.total_time * 100f32 as f64).round() as i64)
-                                    .collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows
+                                .iter()
+                                .map(|r| (r.total_time * 100f32 as f64).round() as i64)
+                                .collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                     ],
                 )
                 .await?;
@@ -153,6 +153,7 @@ impl CompressedQueryStats {
         F: Fn(&QueryStat) -> R,
         R: Eq + std::hash::Hash,
     {
+        use anyhow::Context;
         if rows.is_empty() {
             return Ok(());
         }
@@ -183,18 +184,16 @@ impl CompressedQueryStats {
                     &[
                         &rows[0].database_id,
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.calls).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.calls).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows
-                                    .iter()
-                                    .map(|r| (r.total_time * 100f32 as f64).round() as i64)
-                                    .collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows
+                                .iter()
+                                .map(|r| (r.total_time * 100f32 as f64).round() as i64)
+                                .collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                     ],
                 )
                 .await?;

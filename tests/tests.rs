@@ -7,6 +7,7 @@ use std::time::{Duration, SystemTime};
 mod chrono_tests;
 mod fields_tests;
 mod filter_tests;
+mod string_tests;
 
 #[test]
 fn macrotest() {
@@ -96,8 +97,7 @@ async fn timestamp() {
 
     // The `load` WHERE query and `decompress` timestamp filter work as expected
     let mut stat = QueryStat { database_id, collected_at: start, fingerprint: 1, calls: 1, total_time: 1.0 };
-    for e in 0..3 {
-        println!("{e}");
+    for _ in 0..3 {
         let mut stats = Vec::new();
         for _ in 1..=10 {
             stat.collected_at += Duration::from_secs(60);

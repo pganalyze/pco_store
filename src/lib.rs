@@ -128,8 +128,9 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
     for field in model.fields.iter() {
         let ident = field.ident.clone().unwrap();
         let ty_original = field.ty.clone();
+        let ty_original_s = quote! { #ty_original }.to_string();
         let mut ty = field.ty.clone();
-        let round_float_field = float_round.is_some() && quote! { #ty }.to_string().starts_with("f");
+        let round_float_field = float_round.is_some() && ty_original_s.starts_with("f");
         if group_by.iter().any(|i| *i == ident) {
             decompressed_fields.push(quote! { #ident: self.#ident.clone(), });
         } else {
@@ -139,14 +140,27 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
             if round_float_field {
                 ty = Type::Verbatim(quote! { i64 });
             }
-            if quote! { #ty_original }.to_string() == "bool" {
+            if ty_original_s == "bool" {
                 ty = Type::Verbatim(quote! { u16 });
             }
+            let decompress_field = if ty_original_s == "String" {
+                quote! {
+                    {
+                        let cursor = std::io::Cursor::new(&self.#ident);
+                        let mut decoder = zeekstd::Decoder::new(cursor).context("zeekstd::Decoder")?;
+                        let mut bytes = Vec::new();
+                        std::io::copy(&mut decoder, &mut bytes).context("io::copy")?;
+                        serde_brief::from_slice(&bytes).context("serde_brief::from_slice")?
+                    }
+                }
+            } else {
+                quote! { ::pco::standalone::simple_decompress(&self.#ident)? }
+            };
             decompress_fields.push(quote! {
                 let #ident: Vec<#ty> = if self.#ident.is_empty() {
                     Vec::new()
                 } else {
-                    ::pco::standalone::simple_decompress(&self.#ident)?
+                    #decompress_field
                 };
             });
             compressed_field_sizes.push(quote! { #ident.len(), });
@@ -167,7 +181,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
                 decompressed_fields.push(quote! {
                     #ident: #ident.get(index).cloned().unwrap_or_default() as #ty_original / #float_round as #ty_original,
                 });
-            } else if quote! { #ty_original }.to_string() == "bool" {
+            } else if ty_original_s == "bool" {
                 decompressed_fields.push(quote! {
                     #ident: #ident.get(index).cloned().unwrap_or_default() == 1,
                 });
@@ -190,12 +204,13 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
     for field in model.fields.iter() {
         let ident = field.ident.clone().unwrap();
         let ty_original = field.ty.clone();
+        let ty_original_s = quote! { #ty_original }.to_string();
         let mut ty = field.ty.clone();
-        let round_float_field = float_round.is_some() && quote! { #ty }.to_string().starts_with("f");
+        let round_float_field = float_round.is_some() && ty_original_s.starts_with("f");
         if round_float_field {
             ty = Type::Verbatim(quote! { i64 });
         }
-        if quote! { #ty_original }.to_string() == "bool" {
+        if ty_original_s == "bool" {
             ty = Type::Verbatim(quote! { u16 });
         }
         if group_by.iter().any(|i| *i == ident) {
@@ -219,16 +234,36 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
             store_types.push(Ident::new("BYTEA", Span::call_site()));
             let expr = if round_float_field {
                 quote! { (r.#ident * #float_round as #ty_original).round() as i64 }
-            } else if quote! { #ty_original }.to_string() == "bool" {
+            } else if ty_original_s == "bool" {
                 quote! { r.#ident as u16 }
+            } else if ty_original_s == "String" {
+                // TODO: needless clone here since we're consuming the rows
+                // That could be avoided with a for loop that inserts into each Vec,
+                // consuming the row with `let QueryStat { f1, f2 } = row` at the start.
+                quote! { r.#ident.clone() }
             } else {
                 quote! { r.#ident }
             };
-            store_values.push(quote! {
-                &::pco::standalone::simpler_compress(
-                    &rows.iter().map(|r| #expr).collect::<Vec<_>>(), ::pco::DEFAULT_COMPRESSION_LEVEL
-                ).unwrap(),
-            });
+            let data = quote! { rows.iter().map(|r| #expr).collect::<Vec<_>>() };
+            if ty_original_s == "String" {
+                store_values.push(quote! {
+                    &{
+                        use std::io::Write;
+                        let bytes = serde_brief::to_vec(&#data).context("serde_brief::to_slice")?;
+                        let mut compressed_bytes = Vec::new();
+                        let mut encoder = zeekstd::Encoder::new(&mut compressed_bytes).context("zeekstd::Encoder")?;
+                        encoder.write_all(&bytes).context("encoder.write_all")?;
+                        encoder.finish().context("encoder.finish")?;
+                        compressed_bytes
+                    },
+                });
+            } else {
+                store_values.push(quote! {
+                    &::pco::standalone::simpler_compress(
+                        &#data, ::pco::DEFAULT_COMPRESSION_LEVEL
+                    )?,
+                });
+            }
         }
     }
     let store_fields = store_fields.join(", ");
@@ -306,6 +341,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
 
             /// Decompresses a group of data points.
             pub fn decompress(self) -> anyhow::Result<Vec<#name>> {
+                use anyhow::Context;
                 let mut results = Vec::new();
                 #decompress_fields
                 let len = [#compressed_field_sizes].into_iter().max().unwrap_or(0);
@@ -320,6 +356,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
 
             /// Writes the data to disk.
             pub async fn store(db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>, rows: Vec<#name>) -> anyhow::Result<()> {
+                use anyhow::Context;
                 if rows.is_empty() {
                     return Ok(());
                 }
@@ -353,6 +390,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
                 F: Fn(&#name) -> R,
                 R: Eq + std::hash::Hash,
             {
+                use anyhow::Context;
                 if rows.is_empty() {
                     return Ok(());
                 }
