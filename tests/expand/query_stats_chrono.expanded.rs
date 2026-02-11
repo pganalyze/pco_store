@@ -176,8 +176,7 @@ impl CompressedQueryStats {
                 collected_at: chrono::DateTime::from_timestamp_micros(
                         collected_at[index] as i64,
                     )
-                    .unwrap()
-                    .clone(),
+                    .unwrap(),
                 collected_secs: collected_secs.get(index).cloned().unwrap_or_default(),
                 fingerprint: fingerprint.get(index).cloned().unwrap_or_default(),
                 postgres_role_id: postgres_role_id

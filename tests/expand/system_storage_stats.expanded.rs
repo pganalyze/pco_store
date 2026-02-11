@@ -168,8 +168,7 @@ impl CompressedSystemStorageStats {
                 collected_at: chrono::DateTime::from_timestamp_micros(
                         collected_at[index] as i64,
                     )
-                    .unwrap()
-                    .clone(),
+                    .unwrap(),
                 bytes_available: bytes_available.get(index).cloned().unwrap_or_default(),
                 bytes_total: bytes_total.get(index).cloned().unwrap_or_default(),
                 queue_depth: queue_depth.get(index).cloned().unwrap_or_default(),

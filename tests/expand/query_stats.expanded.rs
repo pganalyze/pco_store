@@ -174,7 +174,7 @@ impl CompressedQueryStats {
             let row = QueryStat {
                 database_id: self.database_id.clone(),
                 collected_at: std::time::SystemTime::UNIX_EPOCH
-                    + std::time::Duration::from_micros(collected_at[index]).clone(),
+                    + std::time::Duration::from_micros(collected_at[index]),
                 collected_secs: collected_secs.get(index).cloned().unwrap_or_default(),
                 fingerprint: fingerprint.get(index).cloned().unwrap_or_default(),
                 postgres_role_id: postgres_role_id

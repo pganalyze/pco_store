@@ -161,7 +161,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
                     }
                 };
                 decompressed_fields.push(quote! {
-                    #ident: #value.clone(),
+                    #ident: #value,
                 });
             } else if round_float_field {
                 decompressed_fields.push(quote! {
