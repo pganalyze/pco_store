@@ -11,8 +11,13 @@ To see the generated code, look in [tests/expand](tests/expand) or run `cargo ex
 
 ## Supported data types
 
-- pco supports `u16`, `u32`, `u64`, `i16`, `i32`, `i64`, `f16`, `f32`, `f64`
-- pco_store adds support for `chrono::DateTime`, `std::time::SystemTime`, `bool`
+pco supports `u16`, `u32`, `u64`, `i16`, `i32`, `i64`, `f16`, `f32`, `f64`
+
+pco_store extends that with support for:
+- `chrono::DateTime`, `std::time::SystemTime`
+- `bool`
+- `uuid::Uuid` (only as a `group_by` field)
+- `String` (only as a `group_by` field)
 
 ## Performance
 

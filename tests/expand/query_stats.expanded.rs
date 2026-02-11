@@ -172,7 +172,7 @@ impl CompressedQueryStats {
             .unwrap_or(0);
         for index in 0..len {
             let row = QueryStat {
-                database_id: self.database_id,
+                database_id: self.database_id.clone(),
                 collected_at: std::time::SystemTime::UNIX_EPOCH
                     + std::time::Duration::from_micros(collected_at[index]),
                 collected_secs: collected_secs.get(index).cloned().unwrap_or_default(),
@@ -207,7 +207,7 @@ impl CompressedQueryStats {
         }
         let mut grouped_rows: ahash::AHashMap<_, Vec<QueryStat>> = ahash::AHashMap::new();
         for row in rows {
-            grouped_rows.entry((row.database_id,)).or_default().push(row);
+            grouped_rows.entry((row.database_id.clone(),)).or_default().push(row);
         }
         let sql = "COPY query_stats (database_id, start_at, end_at, collected_at, collected_secs, fingerprint, postgres_role_id, calls, rows, total_time, io_time, shared_blks_hit, shared_blks_read) FROM STDIN BINARY";
         let types = &[
@@ -333,7 +333,10 @@ impl CompressedQueryStats {
         }
         let mut grouped_rows: ahash::AHashMap<_, Vec<QueryStat>> = ahash::AHashMap::new();
         for row in rows {
-            grouped_rows.entry((row.database_id, grouping(&row))).or_default().push(row);
+            grouped_rows
+                .entry((row.database_id.clone(), grouping(&row)))
+                .or_default()
+                .push(row);
         }
         let sql = "COPY query_stats (database_id, start_at, end_at, collected_at, collected_secs, fingerprint, postgres_role_id, calls, rows, total_time, io_time, shared_blks_hit, shared_blks_read) FROM STDIN BINARY";
         let types = &[

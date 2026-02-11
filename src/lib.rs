@@ -131,7 +131,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
         let mut ty = field.ty.clone();
         let round_float_field = float_round.is_some() && quote! { #ty }.to_string().starts_with("f");
         if group_by.iter().any(|i| *i == ident) {
-            decompressed_fields.push(quote! { #ident: self.#ident, });
+            decompressed_fields.push(quote! { #ident: self.#ident.clone(), });
         } else {
             if timestamp.as_ref().map(|t| *t == ident).unwrap_or(false) {
                 ty = Type::Verbatim(quote! { u64 });
@@ -201,7 +201,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
         if group_by.iter().any(|i| *i == ident) {
             store_fields.push(ident.to_string());
             store_types.push(Ident::new(&copy_type(quote! { #ty }.to_string()), Span::call_site()));
-            store_group.push(quote! { row.#ident, });
+            store_group.push(quote! { row.#ident.clone(), });
             store_values.push(quote! { &rows[0].#ident, });
         } else if timestamp.as_ref().map(|t| *t == ident).unwrap_or(false) {
             store_fields.push("start_at".to_string());
@@ -388,6 +388,8 @@ fn copy_type(rust_type: String) -> &'static str {
         "i32" => "INT4",
         "i64" => "INT8",
         "SystemTime" => "TIMESTAMPTZ",
+        "String" => "TEXT",
+        "Uuid" => "UUID",
         _ => panic!("unsupported copy_type {rust_type:?}"),
     }
 }

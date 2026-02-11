@@ -78,7 +78,7 @@ impl CompressedQueryStats {
         let len = [toplevel.len(), calls.len()].into_iter().max().unwrap_or(0);
         for index in 0..len {
             let row = QueryStat {
-                database_id: self.database_id,
+                database_id: self.database_id.clone(),
                 toplevel: toplevel.get(index).cloned().unwrap_or_default() == 1,
                 calls: calls.get(index).cloned().unwrap_or_default(),
             };
@@ -98,7 +98,7 @@ impl CompressedQueryStats {
         }
         let mut grouped_rows: ahash::AHashMap<_, Vec<QueryStat>> = ahash::AHashMap::new();
         for row in rows {
-            grouped_rows.entry((row.database_id,)).or_default().push(row);
+            grouped_rows.entry((row.database_id.clone(),)).or_default().push(row);
         }
         let sql = "COPY query_stats (database_id, toplevel, calls) FROM STDIN BINARY";
         let types = &[
@@ -154,7 +154,10 @@ impl CompressedQueryStats {
         }
         let mut grouped_rows: ahash::AHashMap<_, Vec<QueryStat>> = ahash::AHashMap::new();
         for row in rows {
-            grouped_rows.entry((row.database_id, grouping(&row))).or_default().push(row);
+            grouped_rows
+                .entry((row.database_id.clone(), grouping(&row)))
+                .or_default()
+                .push(row);
         }
         let sql = "COPY query_stats (database_id, toplevel, calls) FROM STDIN BINARY";
         let types = &[
