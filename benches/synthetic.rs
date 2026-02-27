@@ -1,6 +1,7 @@
 #![allow(dead_code)]
 
 use ahash::AHashMap;
+use peak_alloc::PeakAlloc;
 use anyhow::Result;
 use chrono::{DateTime, DurationRound, Utc};
 use deadpool_postgres::Client;
@@ -14,6 +15,10 @@ mod synthetic {
     pub mod pco_store;
 }
 use synthetic::*;
+
+
+#[global_allocator]
+static PEAK_ALLOC: PeakAlloc = PeakAlloc;
 
 static DB_POOL: std::sync::LazyLock<std::sync::Arc<deadpool_postgres::Pool>> = std::sync::LazyLock::new(|| {
     if std::path::Path::new(".env").exists() {
@@ -29,12 +34,19 @@ static DB_POOL: std::sync::LazyLock<std::sync::Arc<deadpool_postgres::Pool>> = s
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     println!("== pco_store");
+    PEAK_ALLOC.reset_peak_usage();
     let start = Instant::now();
     let pco_store_duration = pco_store::store().await?;
     println!("compressed after {:.1?} ({:.1?} in pco_store)", start.elapsed(), pco_store_duration);
+    println!("peak memory usage: {:.0?}MB", PEAK_ALLOC.peak_usage_as_mb());
+
+    println!();
+
+    PEAK_ALLOC.reset_peak_usage();
     let start = Instant::now();
     let pco_store_duration = pco_store::load().await?;
     println!("decompressed after {:.1?} ({:.1?} in pco_store)", start.elapsed(), pco_store_duration);
+    println!("peak memory usage: {:.0?}MB", PEAK_ALLOC.peak_usage_as_mb());
 
     Ok(())
 }
