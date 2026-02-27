@@ -15,6 +15,28 @@ pub struct QueryStat {
     pub shared_blks_read: i64,
 }
 
+static DEFAULT_COLLECTED_AT: std::sync::LazyLock<SystemTime> = std::sync::LazyLock::new(|| {
+    SystemTime::now()
+});
+
+impl Default for QueryStat {
+    fn default() -> Self {
+        Self {
+            database_id: 0,
+            collected_at: *DEFAULT_COLLECTED_AT,
+            collected_secs: 0,
+            fingerprint: 0,
+            postgres_role_id: 0,
+            calls: 0,
+            rows: 0,
+            total_time: 0.0,
+            io_time: 0.0,
+            shared_blks_hit: 0,
+            shared_blks_read: 0,
+        }
+    }
+}
+
 
 pub async fn store() -> Result<Duration> {
     let db = &mut DB_POOL.get().await.unwrap();
@@ -77,5 +99,38 @@ pub async fn load() -> Result<Duration> {
             stats.push(stat);
         }
     }
+    return Ok(start.elapsed());
+}
+
+pub async fn load_reduce() -> Result<Duration> {
+    let db = &DB_POOL.get().await.unwrap();
+    let database_ids: Vec<i64> = db.query_one("SELECT array_agg(DISTINCT database_id) FROM synthetic_pco_stores", &[]).await?.get(0);
+    let mut stats: AHashMap<(i64, i64, i64), QueryStat> = AHashMap::new();
+    let filter = Filter::new(&database_ids, SystemTime::UNIX_EPOCH..=SystemTime::now());
+
+    // This assumes the stats.push() call takes negligible time.
+    let start = Instant::now();
+    for group in CompressedQueryStats::load(db, filter, ()).await? {
+        for stat in group.decompress()? {
+            let key = (stat.database_id, stat.fingerprint, stat.postgres_role_id);
+            let entry = stats.entry(key).or_default();
+
+            entry.database_id = stat.database_id;
+            entry.collected_at = stat.collected_at;
+            entry.collected_secs += stat.collected_secs;
+            entry.fingerprint = stat.fingerprint;
+            entry.postgres_role_id = stat.postgres_role_id;
+            entry.calls += stat.calls;
+            entry.rows += stat.rows;
+            entry.total_time += stat.total_time;
+            entry.io_time += stat.io_time;
+            entry.shared_blks_hit += stat.shared_blks_hit;
+            entry.shared_blks_read += stat.shared_blks_read;
+        }
+    }
+
+    // Prevent stats from being optimized out of existence.
+    std::hint::black_box(stats);
+
     return Ok(start.elapsed());
 }

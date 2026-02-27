@@ -34,6 +34,7 @@ static DB_POOL: std::sync::LazyLock<std::sync::Arc<deadpool_postgres::Pool>> = s
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
     println!("== pco_store");
+    println!("=== store");
     PEAK_ALLOC.reset_peak_usage();
     let start = Instant::now();
     let pco_store_duration = pco_store::store().await?;
@@ -41,12 +42,23 @@ async fn main() -> Result<()> {
     println!("peak memory usage: {:.0?}MB", PEAK_ALLOC.peak_usage_as_mb());
 
     println!();
+    println!("=== load (Vec)");
 
     PEAK_ALLOC.reset_peak_usage();
     let start = Instant::now();
     let pco_store_duration = pco_store::load().await?;
     println!("decompressed after {:.1?} ({:.1?} in pco_store)", start.elapsed(), pco_store_duration);
     println!("peak memory usage: {:.0?}MB", PEAK_ALLOC.peak_usage_as_mb());
+
+    println!();
+    println!("=== load (reduce)");
+
+    PEAK_ALLOC.reset_peak_usage();
+    let start = Instant::now();
+    let pco_store_duration = pco_store::load_reduce().await?;
+    println!("decompressed after {:.1?} ({:.1?} in pco_store)", start.elapsed(), pco_store_duration);
+    println!("peak memory usage: {:.0?}MB", PEAK_ALLOC.peak_usage_as_mb());
+
 
     Ok(())
 }
