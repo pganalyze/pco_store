@@ -1,6 +1,6 @@
 use super::*;
 
-#[::pco_store::store(timestamp = collected_at, group_by = [database_id], float_round = 2, table_name = comparison_pco_stores)]
+#[::pco_store::store(timestamp = collected_at, group_by = [database_id], float_round = 2, table_name = synthetic_pco_stores)]
 pub struct QueryStat {
     pub database_id: i64,
     pub collected_at: SystemTime,
@@ -19,8 +19,8 @@ pub struct QueryStat {
 pub async fn store() -> Result<Duration> {
     let db = &mut DB_POOL.get().await.unwrap();
     let sql = "
-        DROP TABLE IF EXISTS comparison_pco_stores;
-        CREATE TABLE comparison_pco_stores (
+        DROP TABLE IF EXISTS synthetic_pco_stores;
+        CREATE TABLE synthetic_pco_stores (
             database_id bigint NOT NULL,
             start_at timestamptz NOT NULL,
             end_at timestamptz NOT NULL,
@@ -35,8 +35,8 @@ pub async fn store() -> Result<Duration> {
             shared_blks_hit bytea STORAGE EXTERNAL NOT NULL,
             shared_blks_read bytea STORAGE EXTERNAL NOT NULL
         );
-        CREATE INDEX ON comparison_pco_stores USING btree (database_id);
-        CREATE INDEX ON comparison_pco_stores USING btree (end_at, start_at);
+        CREATE INDEX ON synthetic_pco_stores USING btree (database_id);
+        CREATE INDEX ON synthetic_pco_stores USING btree (end_at, start_at);
     ";
     db.batch_execute(sql).await?;
 
@@ -67,7 +67,7 @@ pub async fn store() -> Result<Duration> {
 
 pub async fn load() -> Result<Duration> {
     let db = &DB_POOL.get().await.unwrap();
-    let database_ids: Vec<i64> = db.query_one("SELECT array_agg(DISTINCT database_id) FROM comparison_pco_stores", &[]).await?.get(0);
+    let database_ids: Vec<i64> = db.query_one("SELECT array_agg(DISTINCT database_id) FROM synthetic_pco_stores", &[]).await?.get(0);
     let mut stats = Vec::new();
     let filter = Filter::new(&database_ids, SystemTime::UNIX_EPOCH..=SystemTime::now());
 
