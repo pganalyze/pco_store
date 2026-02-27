@@ -35,8 +35,7 @@ pub async fn store() -> Result<Duration> {
             shared_blks_hit bytea STORAGE EXTERNAL NOT NULL,
             shared_blks_read bytea STORAGE EXTERNAL NOT NULL
         );
-        CREATE INDEX ON synthetic_pco_stores USING btree (database_id);
-        CREATE INDEX ON synthetic_pco_stores USING btree (end_at, start_at);
+        CREATE INDEX ON synthetic_pco_stores USING btree (database_id, end_at, start_at);
     ";
     db.batch_execute(sql).await?;
 
