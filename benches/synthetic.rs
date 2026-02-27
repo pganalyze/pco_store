@@ -1,14 +1,8 @@
-#![allow(dead_code)]
-
 use ahash::AHashMap;
 use peak_alloc::PeakAlloc;
 use anyhow::Result;
-use chrono::{DateTime, DurationRound, Utc};
-use deadpool_postgres::Client;
 use std::str::FromStr;
 use std::time::{Duration, Instant, SystemTime};
-use tokio_postgres::binary_copy::BinaryCopyInWriter;
-use tokio_postgres::types::{ToSql, Type};
 
 mod synthetic {
     use super::*;
