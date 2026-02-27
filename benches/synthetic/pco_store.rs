@@ -45,7 +45,7 @@ pub async fn store() -> Result<Duration> {
             stats.push(QueryStat {
                 database_id: db_id,
                 collected_at: SystemTime::now(),
-                collected_secs: 10 + i,
+                collected_secs: 10,
                 fingerprint: i % 500,
                 postgres_role_id: i % 1_000,
                 calls: 100 + i,
