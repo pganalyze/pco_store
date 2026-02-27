@@ -17,8 +17,6 @@ pub struct QueryStat {
 
 
 pub async fn store() -> Result<Duration> {
-    let mut pco_store_duration = Duration::ZERO;
-
     let db = &mut DB_POOL.get().await.unwrap();
     let sql = "
         DROP TABLE IF EXISTS comparison_pco_stores;
@@ -41,58 +39,28 @@ pub async fn store() -> Result<Duration> {
         CREATE INDEX ON comparison_pco_stores USING btree (end_at, start_at);
     ";
     db.batch_execute(sql).await?;
-    let database_ids: Vec<i64> = db.query_one("SELECT array_agg(DISTINCT database_id) FROM query_stats", &[]).await?.get(0);
-    for database_id in database_ids {
-        let sql = "
-            SELECT start_at, collected_at, collected_secs, fingerprint, postgres_role_id, calls, rows, total_time, io_time, shared_blks_hit, shared_blks_read
-            FROM query_stats WHERE database_id = $1
-        ";
-        let rows = db.query(sql, &[&database_id]).await?;
 
-
-        let mut grouped_rows: AHashMap<_, Vec<_>> = AHashMap::new();
-        for row in rows {
-            let time: DateTime<Utc> = row.get::<_, SystemTime>(0).into();
-            let date = time.duration_trunc(chrono::Duration::days(1)).unwrap();
-            grouped_rows.entry(date).or_default().push(row);
-        }
-
-        for rows_ in grouped_rows.into_values() {
-            let mut stats = Vec::new();
-            for row in rows_ {
-                let collected_at: Vec<SystemTime> = row.get(1);
-                let collected_secs: Vec<i64> = row.get(2);
-                let fingerprint: Vec<i64> = row.get(3);
-                let postgres_role_id: Vec<i64> = row.get(4);
-                let calls: Vec<i64> = row.get(5);
-                let rows: Vec<i64> = row.get(6);
-                let total_time: Vec<f64> = row.get(7);
-                let io_time: Vec<f64> = row.get(8);
-                let shared_blks_hit: Vec<i64> = row.get(9);
-                let shared_blks_read: Vec<i64> = row.get(10);
-                for (index, collected_at) in collected_at.into_iter().enumerate() {
-                    stats.push(QueryStat {
-                        database_id,
-                        collected_at,
-                        collected_secs: collected_secs[index],
-                        fingerprint: fingerprint[index],
-                        postgres_role_id: postgres_role_id[index],
-                        calls: calls[index],
-                        rows: rows[index],
-                        total_time: total_time[index],
-                        io_time: io_time[index],
-                        shared_blks_hit: shared_blks_hit[index],
-                        shared_blks_read: shared_blks_read[index],
-                    });
-                }
-            }
-
-            let start = Instant::now();
-            CompressedQueryStats::store(db, stats).await?;
-            pco_store_duration += start.elapsed();
-        }
+    let mut stats = Vec::new();
+    for i in 0..1_000_000 {
+        stats.push(QueryStat {
+            database_id: 1,
+            collected_at: SystemTime::now(),
+            collected_secs: 10,
+            fingerprint: i,
+            postgres_role_id: 1,
+            calls: 100,
+            rows: 10,
+            total_time: 1234.0,
+            io_time: 12345.0,
+            shared_blks_hit: 10,
+            shared_blks_read: 20,
+        });
     }
-    Ok(pco_store_duration)
+
+    let start = Instant::now();
+    CompressedQueryStats::store(db, stats).await?;
+
+    Ok(start.elapsed())
 }
 
 pub async fn load() -> Result<Duration> {
