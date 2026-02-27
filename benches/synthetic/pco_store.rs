@@ -41,20 +41,22 @@ pub async fn store() -> Result<Duration> {
     db.batch_execute(sql).await?;
 
     let mut stats = Vec::new();
-    for i in 0..1_000_000 {
-        stats.push(QueryStat {
-            database_id: 1,
-            collected_at: SystemTime::now(),
-            collected_secs: 10,
-            fingerprint: i,
-            postgres_role_id: 1,
-            calls: 100,
-            rows: 10,
-            total_time: 1234.0,
-            io_time: 12345.0,
-            shared_blks_hit: 10,
-            shared_blks_read: 20,
-        });
+    for db_id in 0..100 {
+        for i in 0..100_000 {
+            stats.push(QueryStat {
+                database_id: db_id,
+                collected_at: SystemTime::now(),
+                collected_secs: 10,
+                fingerprint: i,
+                postgres_role_id: 1,
+                calls: 100,
+                rows: 10,
+                total_time: 1234.0,
+                io_time: 12345.0,
+                shared_blks_hit: 10,
+                shared_blks_read: 20,
+            });
+        }
     }
 
     let start = Instant::now();
