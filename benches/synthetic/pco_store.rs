@@ -46,15 +46,15 @@ pub async fn store() -> Result<Duration> {
             stats.push(QueryStat {
                 database_id: db_id,
                 collected_at: SystemTime::now(),
-                collected_secs: 10,
-                fingerprint: i,
-                postgres_role_id: 1,
-                calls: 100,
-                rows: 10,
+                collected_secs: 10 + i,
+                fingerprint: i % 500,
+                postgres_role_id: i % 1_000,
+                calls: 100 + i,
+                rows: 10 + i,
                 total_time: 1234.0,
                 io_time: 12345.0,
-                shared_blks_hit: 10,
-                shared_blks_read: 20,
+                shared_blks_hit: 10 + i,
+                shared_blks_read: 20 + i,
             });
         }
     }
