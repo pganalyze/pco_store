@@ -108,7 +108,6 @@ pub async fn load_reduce() -> Result<Duration> {
     let mut stats: AHashMap<(i64, i64, i64), QueryStat> = AHashMap::new();
     let filter = Filter::new(&database_ids, SystemTime::UNIX_EPOCH..=SystemTime::now());
 
-    // This assumes the stats.push() call takes negligible time.
     let start = Instant::now();
     for group in CompressedQueryStats::load(db, filter, ()).await? {
         for stat in group.decompress()? {
