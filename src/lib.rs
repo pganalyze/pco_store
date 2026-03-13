@@ -123,7 +123,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
 
     // decompress
     let mut decompress_fields = Vec::new();
-    let mut compressed_field_sizes = Vec::new();
+    let mut decompress_fields_first = None;
     let mut decompressed_fields = Vec::new();
     for field in model.fields.iter() {
         let ident = field.ident.clone().unwrap();
@@ -143,21 +143,27 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
                 ty = Type::Verbatim(quote! { u16 });
             }
             decompress_fields.push(quote! {
-                let #ident: Vec<#ty> = if self.#ident.is_empty() {
+                // let mut #ident = PcoIterator::<#ty>::new(self.#ident)?;
+                let mut #ident: std::vec::IntoIter<#ty> = if self.#ident.is_empty() {
                     Vec::new()
                 } else {
                     ::pco::standalone::simple_decompress(&self.#ident)?
-                };
+                }.into_iter();
             });
-            compressed_field_sizes.push(quote! { #ident.len(), });
+            let value = if decompress_fields_first.is_none() {
+                quote! { #ident }
+            } else {
+                // TODO: don't discard error
+                quote! { #ident.next().unwrap_or_default() }
+            };
             if timestamp.as_ref().map(|t| *t == ident).unwrap_or(false) {
                 let value = if using_chrono {
                     quote! {
-                        chrono::DateTime::from_timestamp_micros(#ident[index] as i64).unwrap()
+                        chrono::DateTime::from_timestamp_micros(#value as i64).unwrap()
                     }
                 } else {
                     quote! {
-                        std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_micros(#ident[index])
+                        std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_micros(#value)
                     }
                 };
                 decompressed_fields.push(quote! {
@@ -165,21 +171,23 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
                 });
             } else if round_float_field {
                 decompressed_fields.push(quote! {
-                    #ident: #ident.get(index).cloned().unwrap_or_default() as #ty_original / #float_round as #ty_original,
+                    #ident: #value as #ty_original / #float_round as #ty_original,
                 });
             } else if quote! { #ty_original }.to_string() == "bool" {
                 decompressed_fields.push(quote! {
-                    #ident: #ident.get(index).cloned().unwrap_or_default() == 1,
+                    #ident: #value == 1,
                 });
             } else {
                 decompressed_fields.push(quote! {
-                    #ident: #ident.get(index).cloned().unwrap_or_default(),
+                    #ident: #value,
                 });
+            }
+            if decompress_fields_first.is_none() {
+                decompress_fields_first = Some(ident.clone());
             }
         }
     }
     let decompress_fields = tokens(decompress_fields);
-    let compressed_field_sizes = tokens(compressed_field_sizes);
     let decompressed_fields = tokens(decompressed_fields);
 
     // store
@@ -212,7 +220,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
             store_types.push(Ident::new("BYTEA", Span::call_site()));
             store_values.push(quote! {
                 &start_at, &end_at,
-                &::pco::standalone::simpler_compress(&#timestamp, ::pco::DEFAULT_COMPRESSION_LEVEL).unwrap(),
+                &::pco::standalone::simple_compress(&#timestamp, &Default::default()).unwrap(),
             });
         } else {
             store_fields.push(ident.to_string());
@@ -225,8 +233,8 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
                 quote! { r.#ident }
             };
             store_values.push(quote! {
-                &::pco::standalone::simpler_compress(
-                    &rows.iter().map(|r| #expr).collect::<Vec<_>>(), ::pco::DEFAULT_COMPRESSION_LEVEL
+                &::pco::standalone::simple_compress(
+                    &rows.iter().map(|r| #expr).collect::<Vec<_>>(), &Default::default()
                 ).unwrap(),
             });
         }
@@ -273,7 +281,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
                 db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
                 mut filter: Filter,
                 fields: impl TryInto<Fields>
-            ) -> anyhow::Result<Vec<#packed_name>> {
+            ) -> anyhow::Result<impl Iterator<Item = #name>> {
                 let mut fields = fields.try_into().map_err(|_| anyhow::Error::msg("unknown field"))?;
                 fields.merge_filter(&filter);
                 #load_checks
@@ -282,7 +290,8 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
                 for row in db.query(&db.prepare_cached(&sql).await?, &[#load_params]).await? {
                     results.push(fields.load_from_row(row, Some(filter.clone()))?);
                 }
-                Ok(results)
+                // TODO: error handling
+                Ok(results.into_iter().flat_map(|r| r.decompress().unwrap()))
             }
 
             /// Deletes data for the specified filters, returning it to the caller.
@@ -292,7 +301,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
                 db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
                 mut filter: Filter,
                 fields: impl TryInto<Fields>
-            ) -> anyhow::Result<Vec<#packed_name>> {
+            ) -> anyhow::Result<impl Iterator<Item = #name>> {
                 let mut fields = fields.try_into().map_err(|_| anyhow::Error::msg("unknown field"))?;
                 fields.merge_filter(&filter);
                 #load_checks
@@ -301,21 +310,16 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
                 for row in db.query(&db.prepare_cached(&sql).await?, &[#load_params]).await? {
                     results.push(fields.load_from_row(row, None)?);
                 }
-                Ok(results)
+                Ok(results.into_iter().flat_map(|r| r.decompress().unwrap()))
             }
 
             /// Decompresses a group of data points.
-            pub fn decompress(self) -> anyhow::Result<Vec<#name>> {
-                let mut results = Vec::new();
+            fn decompress(self) -> anyhow::Result<impl Iterator<Item = #name>> {
                 #decompress_fields
-                let len = [#compressed_field_sizes].into_iter().max().unwrap_or(0);
-                for index in 0..len {
+                Ok(#decompress_fields_first.filter_map(move |#decompress_fields_first| {
                     let row = #name { #decompressed_fields };
-                    if self.filter.as_ref().map(|f| f.filter(&row)) != Some(false) {
-                        results.push(row);
-                    }
-                }
-                Ok(results)
+                    (self.filter.as_ref().map(|f: &Filter| f.filter(&row)) != Some(false)).then(|| row)
+                }))
             }
 
             /// Writes the data to disk.
@@ -371,6 +375,72 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
                 }
                 writer.finish().await?;
                 Ok(())
+            }
+        }
+
+        struct PcoIterator<T: pco::data_types::Number> {
+            src: Vec<u8>,
+            file_decompressor: Option<pco::standalone::FileDecompressor>,
+            src_pos: usize,
+            buffer: Vec<T>,
+            current_chunk: std::slice::Iter<'static, T>,
+        }
+        impl<T: pco::data_types::Number> Iterator for PcoIterator<T> {
+            type Item = T;
+            fn next(&mut self) -> Option<Self::Item> {
+                if let Some(&val) = self.current_chunk.next() {
+                    return Some(val);
+                }
+                // Buffer exhausted, try to refill
+                if self.fill_buffer().unwrap_or(false) {
+                    self.current_chunk.next().copied()
+                } else {
+                    None
+                }
+            }
+        }
+        impl<T: pco::data_types::Number> PcoIterator<T> {
+            pub fn new(src: Vec<u8>) -> pco::errors::PcoResult<Self> {
+                if src.is_empty() {
+                    return Ok(Self {
+                        src,
+                        file_decompressor: None,
+                        src_pos: 0,
+                        buffer: Vec::new(),
+                        current_chunk: [].iter(),
+                    });
+                }
+                let (fd, remaining) = pco::standalone::FileDecompressor::new(src.as_slice())?;
+                let header_size = src.len() - remaining.len();
+                Ok(Self {
+                    src,
+                    file_decompressor: Some(fd),
+                    src_pos: header_size,
+                    buffer: Vec::new(),
+                    current_chunk: [].iter(),
+                })
+            }
+            fn fill_buffer(&mut self) -> pco::errors::PcoResult<bool> {
+                let Some(fd) = &self.file_decompressor else { return Ok(false); };
+                let remaining = &self.src[self.src_pos..];
+                match fd.chunk_decompressor::<T, _>(remaining)? {
+                    pco::standalone::DecompressorItem::Chunk(mut chunk) => {
+                        let n = chunk.n();
+                        self.buffer.resize(n, T::default());
+                        chunk.read(&mut self.buffer)?;
+                        let remainder = chunk.into_src();
+                        self.src_pos = self.src.len() - remainder.len();
+                        // SAFETY: We are creating a 'static reference to our own buffer.
+                        // This is safe because current_chunk is always dropped or replaced
+                        // before buffer is modified or dropped.
+                        unsafe {
+                            let slice = std::slice::from_raw_parts(self.buffer.as_ptr(), n);
+                            self.current_chunk = slice.iter();
+                        }
+                        Ok(true)
+                    }
+                    pco::standalone::DecompressorItem::EndOfData(_) => Ok(false),
+                }
             }
         }
 

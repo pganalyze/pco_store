@@ -33,7 +33,7 @@ impl CompressedQueryStats {
         db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
         mut filter: Filter,
         fields: impl TryInto<Fields>,
-    ) -> anyhow::Result<Vec<CompressedQueryStats>> {
+    ) -> anyhow::Result<impl Iterator<Item = QueryStat>> {
         let mut fields = fields
             .try_into()
             .map_err(|_| anyhow::Error::msg("unknown field"))?;
@@ -62,7 +62,7 @@ impl CompressedQueryStats {
         {
             results.push(fields.load_from_row(row, Some(filter.clone()))?);
         }
-        Ok(results)
+        Ok(results.into_iter().flat_map(|r| r.decompress().unwrap()))
     }
     /// Deletes data for the specified filters, returning it to the caller.
     ///
@@ -71,7 +71,7 @@ impl CompressedQueryStats {
         db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
         mut filter: Filter,
         fields: impl TryInto<Fields>,
-    ) -> anyhow::Result<Vec<CompressedQueryStats>> {
+    ) -> anyhow::Result<impl Iterator<Item = QueryStat>> {
         let mut fields = fields
             .try_into()
             .map_err(|_| anyhow::Error::msg("unknown field"))?;
@@ -100,102 +100,104 @@ impl CompressedQueryStats {
         {
             results.push(fields.load_from_row(row, None)?);
         }
-        Ok(results)
+        Ok(results.into_iter().flat_map(|r| r.decompress().unwrap()))
     }
     /// Decompresses a group of data points.
-    pub fn decompress(self) -> anyhow::Result<Vec<QueryStat>> {
-        let mut results = Vec::new();
-        let collected_at: Vec<u64> = if self.collected_at.is_empty() {
+    fn decompress(self) -> anyhow::Result<impl Iterator<Item = QueryStat>> {
+        let mut collected_at: std::vec::IntoIter<u64> = if self.collected_at.is_empty() {
             Vec::new()
         } else {
             ::pco::standalone::simple_decompress(&self.collected_at)?
-        };
-        let collected_secs: Vec<i64> = if self.collected_secs.is_empty() {
+        }
+            .into_iter();
+        let mut collected_secs: std::vec::IntoIter<i64> = if self
+            .collected_secs
+            .is_empty()
+        {
             Vec::new()
         } else {
             ::pco::standalone::simple_decompress(&self.collected_secs)?
-        };
-        let fingerprint: Vec<i64> = if self.fingerprint.is_empty() {
+        }
+            .into_iter();
+        let mut fingerprint: std::vec::IntoIter<i64> = if self.fingerprint.is_empty() {
             Vec::new()
         } else {
             ::pco::standalone::simple_decompress(&self.fingerprint)?
-        };
-        let postgres_role_id: Vec<i64> = if self.postgres_role_id.is_empty() {
+        }
+            .into_iter();
+        let mut postgres_role_id: std::vec::IntoIter<i64> = if self
+            .postgres_role_id
+            .is_empty()
+        {
             Vec::new()
         } else {
             ::pco::standalone::simple_decompress(&self.postgres_role_id)?
-        };
-        let calls: Vec<i64> = if self.calls.is_empty() {
+        }
+            .into_iter();
+        let mut calls: std::vec::IntoIter<i64> = if self.calls.is_empty() {
             Vec::new()
         } else {
             ::pco::standalone::simple_decompress(&self.calls)?
-        };
-        let rows: Vec<i64> = if self.rows.is_empty() {
+        }
+            .into_iter();
+        let mut rows: std::vec::IntoIter<i64> = if self.rows.is_empty() {
             Vec::new()
         } else {
             ::pco::standalone::simple_decompress(&self.rows)?
-        };
-        let total_time: Vec<f64> = if self.total_time.is_empty() {
+        }
+            .into_iter();
+        let mut total_time: std::vec::IntoIter<f64> = if self.total_time.is_empty() {
             Vec::new()
         } else {
             ::pco::standalone::simple_decompress(&self.total_time)?
-        };
-        let io_time: Vec<f64> = if self.io_time.is_empty() {
+        }
+            .into_iter();
+        let mut io_time: std::vec::IntoIter<f64> = if self.io_time.is_empty() {
             Vec::new()
         } else {
             ::pco::standalone::simple_decompress(&self.io_time)?
-        };
-        let shared_blks_hit: Vec<i64> = if self.shared_blks_hit.is_empty() {
+        }
+            .into_iter();
+        let mut shared_blks_hit: std::vec::IntoIter<i64> = if self
+            .shared_blks_hit
+            .is_empty()
+        {
             Vec::new()
         } else {
             ::pco::standalone::simple_decompress(&self.shared_blks_hit)?
-        };
-        let shared_blks_read: Vec<i64> = if self.shared_blks_read.is_empty() {
+        }
+            .into_iter();
+        let mut shared_blks_read: std::vec::IntoIter<i64> = if self
+            .shared_blks_read
+            .is_empty()
+        {
             Vec::new()
         } else {
             ::pco::standalone::simple_decompress(&self.shared_blks_read)?
-        };
-        let len = [
-            collected_at.len(),
-            collected_secs.len(),
-            fingerprint.len(),
-            postgres_role_id.len(),
-            calls.len(),
-            rows.len(),
-            total_time.len(),
-            io_time.len(),
-            shared_blks_hit.len(),
-            shared_blks_read.len(),
-        ]
-            .into_iter()
-            .max()
-            .unwrap_or(0);
-        for index in 0..len {
-            let row = QueryStat {
-                database_id: self.database_id.clone(),
-                collected_at: std::time::SystemTime::UNIX_EPOCH
-                    + std::time::Duration::from_micros(collected_at[index]),
-                collected_secs: collected_secs.get(index).cloned().unwrap_or_default(),
-                fingerprint: fingerprint.get(index).cloned().unwrap_or_default(),
-                postgres_role_id: postgres_role_id
-                    .get(index)
-                    .cloned()
-                    .unwrap_or_default(),
-                calls: calls.get(index).cloned().unwrap_or_default(),
-                rows: rows.get(index).cloned().unwrap_or_default(),
-                total_time: total_time.get(index).cloned().unwrap_or_default(),
-                io_time: io_time.get(index).cloned().unwrap_or_default(),
-                shared_blks_hit: shared_blks_hit.get(index).cloned().unwrap_or_default(),
-                shared_blks_read: shared_blks_read
-                    .get(index)
-                    .cloned()
-                    .unwrap_or_default(),
-            };
-            if self.filter.as_ref().map(|f| f.filter(&row)) != Some(false) {
-                results.push(row);
-            }
         }
-        Ok(results)
+            .into_iter();
+        Ok(
+            collected_at
+                .filter_map(move |collected_at| {
+                    let row = QueryStat {
+                        database_id: self.database_id.clone(),
+                        collected_at: std::time::SystemTime::UNIX_EPOCH
+                            + std::time::Duration::from_micros(collected_at),
+                        collected_secs: collected_secs.next().unwrap_or_default(),
+                        fingerprint: fingerprint.next().unwrap_or_default(),
+                        postgres_role_id: postgres_role_id.next().unwrap_or_default(),
+                        calls: calls.next().unwrap_or_default(),
+                        rows: rows.next().unwrap_or_default(),
+                        total_time: total_time.next().unwrap_or_default(),
+                        io_time: io_time.next().unwrap_or_default(),
+                        shared_blks_hit: shared_blks_hit.next().unwrap_or_default(),
+                        shared_blks_read: shared_blks_read.next().unwrap_or_default(),
+                    };
+                    (self.filter.as_ref().map(|f: &Filter| f.filter(&row))
+                        != Some(false))
+                        .then(|| row)
+                }),
+        )
     }
     /// Writes the data to disk.
     pub async fn store(
@@ -252,60 +254,60 @@ impl CompressedQueryStats {
                         &rows[0].database_id,
                         &start_at,
                         &end_at,
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &collected_at,
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &Default::default(),
                             )
                             .unwrap(),
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &rows.iter().map(|r| r.collected_secs).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &Default::default(),
                             )
                             .unwrap(),
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &rows.iter().map(|r| r.fingerprint).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &Default::default(),
                             )
                             .unwrap(),
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &rows
                                     .iter()
                                     .map(|r| r.postgres_role_id)
                                     .collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &Default::default(),
                             )
                             .unwrap(),
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &rows.iter().map(|r| r.calls).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &Default::default(),
                             )
                             .unwrap(),
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &rows.iter().map(|r| r.rows).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &Default::default(),
                             )
                             .unwrap(),
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &rows.iter().map(|r| r.total_time).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &Default::default(),
                             )
                             .unwrap(),
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &rows.iter().map(|r| r.io_time).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &Default::default(),
                             )
                             .unwrap(),
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &rows.iter().map(|r| r.shared_blks_hit).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &Default::default(),
                             )
                             .unwrap(),
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &rows
                                     .iter()
                                     .map(|r| r.shared_blks_read)
                                     .collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &Default::default(),
                             )
                             .unwrap(),
                     ],
@@ -381,60 +383,60 @@ impl CompressedQueryStats {
                         &rows[0].database_id,
                         &start_at,
                         &end_at,
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &collected_at,
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &Default::default(),
                             )
                             .unwrap(),
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &rows.iter().map(|r| r.collected_secs).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &Default::default(),
                             )
                             .unwrap(),
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &rows.iter().map(|r| r.fingerprint).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &Default::default(),
                             )
                             .unwrap(),
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &rows
                                     .iter()
                                     .map(|r| r.postgres_role_id)
                                     .collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &Default::default(),
                             )
                             .unwrap(),
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &rows.iter().map(|r| r.calls).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &Default::default(),
                             )
                             .unwrap(),
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &rows.iter().map(|r| r.rows).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &Default::default(),
                             )
                             .unwrap(),
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &rows.iter().map(|r| r.total_time).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &Default::default(),
                             )
                             .unwrap(),
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &rows.iter().map(|r| r.io_time).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &Default::default(),
                             )
                             .unwrap(),
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &rows.iter().map(|r| r.shared_blks_hit).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &Default::default(),
                             )
                             .unwrap(),
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &rows
                                     .iter()
                                     .map(|r| r.shared_blks_read)
                                     .collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &Default::default(),
                             )
                             .unwrap(),
                     ],
@@ -443,6 +445,69 @@ impl CompressedQueryStats {
         }
         writer.finish().await?;
         Ok(())
+    }
+}
+struct PcoIterator<T: pco::data_types::Number> {
+    src: Vec<u8>,
+    file_decompressor: Option<pco::standalone::FileDecompressor>,
+    src_pos: usize,
+    buffer: Vec<T>,
+    current_chunk: std::slice::Iter<'static, T>,
+}
+impl<T: pco::data_types::Number> Iterator for PcoIterator<T> {
+    type Item = T;
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(&val) = self.current_chunk.next() {
+            return Some(val);
+        }
+        if self.fill_buffer().unwrap_or(false) {
+            self.current_chunk.next().copied()
+        } else {
+            None
+        }
+    }
+}
+impl<T: pco::data_types::Number> PcoIterator<T> {
+    pub fn new(src: Vec<u8>) -> pco::errors::PcoResult<Self> {
+        if src.is_empty() {
+            return Ok(Self {
+                src,
+                file_decompressor: None,
+                src_pos: 0,
+                buffer: Vec::new(),
+                current_chunk: [].iter(),
+            });
+        }
+        let (fd, remaining) = pco::standalone::FileDecompressor::new(src.as_slice())?;
+        let header_size = src.len() - remaining.len();
+        Ok(Self {
+            src,
+            file_decompressor: Some(fd),
+            src_pos: header_size,
+            buffer: Vec::new(),
+            current_chunk: [].iter(),
+        })
+    }
+    fn fill_buffer(&mut self) -> pco::errors::PcoResult<bool> {
+        let Some(fd) = &self.file_decompressor else {
+            return Ok(false);
+        };
+        let remaining = &self.src[self.src_pos..];
+        match fd.chunk_decompressor::<T, _>(remaining)? {
+            pco::standalone::DecompressorItem::Chunk(mut chunk) => {
+                let n = chunk.n();
+                self.buffer.resize(n, T::default());
+                chunk.read(&mut self.buffer)?;
+                let remainder = chunk.into_src();
+                self.src_pos = self.src.len() - remainder.len();
+                unsafe {
+                    let slice = std::slice::from_raw_parts(self.buffer.as_ptr(), n);
+                    self.current_chunk = slice.iter();
+                }
+                Ok(true)
+            }
+            pco::standalone::DecompressorItem::EndOfData(_) => Ok(false),
+        }
     }
 }
 #[serde(deny_unknown_fields)]
