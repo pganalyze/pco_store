@@ -15,9 +15,7 @@ pub struct QueryStat {
     pub shared_blks_read: i64,
 }
 
-static DEFAULT_COLLECTED_AT: std::sync::LazyLock<SystemTime> = std::sync::LazyLock::new(|| {
-    SystemTime::now()
-});
+static DEFAULT_COLLECTED_AT: std::sync::LazyLock<SystemTime> = std::sync::LazyLock::new(|| SystemTime::now());
 
 impl Default for QueryStat {
     fn default() -> Self {
@@ -36,7 +34,6 @@ impl Default for QueryStat {
         }
     }
 }
-
 
 pub async fn store() -> Result<Duration> {
     let db = &mut DB_POOL.get().await.unwrap();

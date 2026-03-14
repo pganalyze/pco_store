@@ -1,6 +1,6 @@
 use ahash::AHashMap;
-use peak_alloc::PeakAlloc;
 use anyhow::Result;
+use peak_alloc::PeakAlloc;
 use std::str::FromStr;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -9,7 +9,6 @@ mod synthetic {
     pub mod pco_store;
 }
 use synthetic::*;
-
 
 #[global_allocator]
 static PEAK_ALLOC: PeakAlloc = PeakAlloc;
@@ -52,7 +51,6 @@ async fn main() -> Result<()> {
     let pco_store_duration = pco_store::load_reduce().await?;
     println!("decompressed after {:.1?} ({:.1?} in pco_store)", start.elapsed(), pco_store_duration);
     println!("peak memory usage: {:.0?}MB", PEAK_ALLOC.peak_usage_as_mb());
-
 
     Ok(())
 }
