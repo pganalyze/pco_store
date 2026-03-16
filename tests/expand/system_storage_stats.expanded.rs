@@ -31,7 +31,7 @@ impl CompressedSystemStorageStats {
         db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
         mut filter: Filter,
         fields: impl TryInto<Fields>,
-    ) -> anyhow::Result<Vec<CompressedSystemStorageStats>> {
+    ) -> anyhow::Result<impl Iterator<Item = SystemStorageStat>> {
         let mut fields = fields
             .try_into()
             .map_err(|_| anyhow::Error::msg("unknown field"))?;
@@ -68,7 +68,7 @@ impl CompressedSystemStorageStats {
         {
             results.push(fields.load_from_row(row, Some(filter.clone()))?);
         }
-        Ok(results)
+        Ok(results.into_iter().flat_map(|r| r.decompress().unwrap()))
     }
     /// Deletes data for the specified filters, returning it to the caller.
     ///
@@ -77,7 +77,7 @@ impl CompressedSystemStorageStats {
         db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
         mut filter: Filter,
         fields: impl TryInto<Fields>,
-    ) -> anyhow::Result<Vec<CompressedSystemStorageStats>> {
+    ) -> anyhow::Result<impl Iterator<Item = SystemStorageStat>> {
         let mut fields = fields
             .try_into()
             .map_err(|_| anyhow::Error::msg("unknown field"))?;
@@ -114,74 +114,74 @@ impl CompressedSystemStorageStats {
         {
             results.push(fields.load_from_row(row, None)?);
         }
-        Ok(results)
+        Ok(results.into_iter().flat_map(|r| r.decompress().unwrap()))
     }
     /// Decompresses a group of data points.
-    pub fn decompress(self) -> anyhow::Result<Vec<SystemStorageStat>> {
-        let mut results = Vec::new();
-        let collected_at: Vec<u64> = if self.collected_at.is_empty() {
+    fn decompress(self) -> anyhow::Result<impl Iterator<Item = SystemStorageStat>> {
+        let mut collected_at: std::vec::IntoIter<u64> = if self.collected_at.is_empty() {
             Vec::new()
         } else {
             ::pco::standalone::simple_decompress(&self.collected_at)?
-        };
-        let bytes_available: Vec<i64> = if self.bytes_available.is_empty() {
+        }
+            .into_iter();
+        let mut bytes_available: std::vec::IntoIter<i64> = if self
+            .bytes_available
+            .is_empty()
+        {
             Vec::new()
         } else {
             ::pco::standalone::simple_decompress(&self.bytes_available)?
-        };
-        let bytes_total: Vec<i64> = if self.bytes_total.is_empty() {
+        }
+            .into_iter();
+        let mut bytes_total: std::vec::IntoIter<i64> = if self.bytes_total.is_empty() {
             Vec::new()
         } else {
             ::pco::standalone::simple_decompress(&self.bytes_total)?
-        };
-        let queue_depth: Vec<i64> = if self.queue_depth.is_empty() {
+        }
+            .into_iter();
+        let mut queue_depth: std::vec::IntoIter<i64> = if self.queue_depth.is_empty() {
             Vec::new()
         } else {
             ::pco::standalone::simple_decompress(&self.queue_depth)?
-        };
-        let read_latency: Vec<i64> = if self.read_latency.is_empty() {
+        }
+            .into_iter();
+        let mut read_latency: std::vec::IntoIter<i64> = if self.read_latency.is_empty() {
             Vec::new()
         } else {
             ::pco::standalone::simple_decompress(&self.read_latency)?
-        };
-        let write_latency: Vec<i64> = if self.write_latency.is_empty() {
+        }
+            .into_iter();
+        let mut write_latency: std::vec::IntoIter<i64> = if self.write_latency.is_empty()
+        {
             Vec::new()
         } else {
             ::pco::standalone::simple_decompress(&self.write_latency)?
-        };
-        let len = [
-            collected_at.len(),
-            bytes_available.len(),
-            bytes_total.len(),
-            queue_depth.len(),
-            read_latency.len(),
-            write_latency.len(),
-        ]
-            .into_iter()
-            .max()
-            .unwrap_or(0);
-        for index in 0..len {
-            let row = SystemStorageStat {
-                server_id: self.server_id.clone(),
-                granularity: self.granularity.clone(),
-                mountpoint: self.mountpoint.clone(),
-                collected_at: chrono::DateTime::from_timestamp_micros(
-                        collected_at[index] as i64,
-                    )
-                    .unwrap(),
-                bytes_available: bytes_available.get(index).cloned().unwrap_or_default(),
-                bytes_total: bytes_total.get(index).cloned().unwrap_or_default(),
-                queue_depth: queue_depth.get(index).cloned().unwrap_or_default(),
-                read_latency: read_latency.get(index).cloned().unwrap_or_default() as f64
-                    / 100f32 as f64,
-                write_latency: write_latency.get(index).cloned().unwrap_or_default()
-                    as f64 / 100f32 as f64,
-            };
-            if self.filter.as_ref().map(|f| f.filter(&row)) != Some(false) {
-                results.push(row);
-            }
         }
-        Ok(results)
+            .into_iter();
+        Ok(
+            collected_at
+                .filter_map(move |collected_at| {
+                    let row = SystemStorageStat {
+                        server_id: self.server_id.clone(),
+                        granularity: self.granularity.clone(),
+                        mountpoint: self.mountpoint.clone(),
+                        collected_at: chrono::DateTime::from_timestamp_micros(
+                                collected_at as i64,
+                            )
+                            .unwrap(),
+                        bytes_available: bytes_available.next().unwrap_or_default(),
+                        bytes_total: bytes_total.next().unwrap_or_default(),
+                        queue_depth: queue_depth.next().unwrap_or_default(),
+                        read_latency: read_latency.next().unwrap_or_default() as f64
+                            / 100f32 as f64,
+                        write_latency: write_latency.next().unwrap_or_default() as f64
+                            / 100f32 as f64,
+                    };
+                    (self.filter.as_ref().map(|f: &Filter| f.filter(&row))
+                        != Some(false))
+                        .then(|| row)
+                }),
+        )
     }
     /// Writes the data to disk.
     pub async fn store(
@@ -240,40 +240,40 @@ impl CompressedSystemStorageStats {
                         &rows[0].mountpoint,
                         &start_at,
                         &end_at,
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &collected_at,
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &Default::default(),
                             )
                             .unwrap(),
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &rows.iter().map(|r| r.bytes_available).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &Default::default(),
                             )
                             .unwrap(),
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &rows.iter().map(|r| r.bytes_total).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &Default::default(),
                             )
                             .unwrap(),
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &rows.iter().map(|r| r.queue_depth).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &Default::default(),
                             )
                             .unwrap(),
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &rows
                                     .iter()
                                     .map(|r| (r.read_latency * 100f32 as f64).round() as i64)
                                     .collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &Default::default(),
                             )
                             .unwrap(),
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &rows
                                     .iter()
                                     .map(|r| (r.write_latency * 100f32 as f64).round() as i64)
                                     .collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &Default::default(),
                             )
                             .unwrap(),
                     ],
@@ -349,40 +349,40 @@ impl CompressedSystemStorageStats {
                         &rows[0].mountpoint,
                         &start_at,
                         &end_at,
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &collected_at,
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &Default::default(),
                             )
                             .unwrap(),
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &rows.iter().map(|r| r.bytes_available).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &Default::default(),
                             )
                             .unwrap(),
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &rows.iter().map(|r| r.bytes_total).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &Default::default(),
                             )
                             .unwrap(),
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &rows.iter().map(|r| r.queue_depth).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &Default::default(),
                             )
                             .unwrap(),
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &rows
                                     .iter()
                                     .map(|r| (r.read_latency * 100f32 as f64).round() as i64)
                                     .collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &Default::default(),
                             )
                             .unwrap(),
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &rows
                                     .iter()
                                     .map(|r| (r.write_latency * 100f32 as f64).round() as i64)
                                     .collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &Default::default(),
                             )
                             .unwrap(),
                     ],
@@ -391,6 +391,69 @@ impl CompressedSystemStorageStats {
         }
         writer.finish().await?;
         Ok(())
+    }
+}
+struct PcoIterator<T: pco::data_types::Number> {
+    src: Vec<u8>,
+    file_decompressor: Option<pco::standalone::FileDecompressor>,
+    src_pos: usize,
+    buffer: Vec<T>,
+    current_chunk: std::slice::Iter<'static, T>,
+}
+impl<T: pco::data_types::Number> Iterator for PcoIterator<T> {
+    type Item = T;
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(&val) = self.current_chunk.next() {
+            return Some(val);
+        }
+        if self.fill_buffer().unwrap_or(false) {
+            self.current_chunk.next().copied()
+        } else {
+            None
+        }
+    }
+}
+impl<T: pco::data_types::Number> PcoIterator<T> {
+    pub fn new(src: Vec<u8>) -> pco::errors::PcoResult<Self> {
+        if src.is_empty() {
+            return Ok(Self {
+                src,
+                file_decompressor: None,
+                src_pos: 0,
+                buffer: Vec::new(),
+                current_chunk: [].iter(),
+            });
+        }
+        let (fd, remaining) = pco::standalone::FileDecompressor::new(src.as_slice())?;
+        let header_size = src.len() - remaining.len();
+        Ok(Self {
+            src,
+            file_decompressor: Some(fd),
+            src_pos: header_size,
+            buffer: Vec::new(),
+            current_chunk: [].iter(),
+        })
+    }
+    fn fill_buffer(&mut self) -> pco::errors::PcoResult<bool> {
+        let Some(fd) = &self.file_decompressor else {
+            return Ok(false);
+        };
+        let remaining = &self.src[self.src_pos..];
+        match fd.chunk_decompressor::<T, _>(remaining)? {
+            pco::standalone::DecompressorItem::Chunk(mut chunk) => {
+                let n = chunk.n();
+                self.buffer.resize(n, T::default());
+                chunk.read(&mut self.buffer)?;
+                let remainder = chunk.into_src();
+                self.src_pos = self.src.len() - remainder.len();
+                unsafe {
+                    let slice = std::slice::from_raw_parts(self.buffer.as_ptr(), n);
+                    self.current_chunk = slice.iter();
+                }
+                Ok(true)
+            }
+            pco::standalone::DecompressorItem::EndOfData(_) => Ok(false),
+        }
     }
 }
 #[serde(deny_unknown_fields)]

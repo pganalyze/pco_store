@@ -20,7 +20,7 @@ static DB_POOL: std::sync::LazyLock<std::sync::Arc<deadpool_postgres::Pool>> = s
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    println!("== pco_store");
+    println!("== synthetic");
     println!("=== store");
     PEAK_ALLOC.reset_peak_usage();
     let start = Instant::now();
@@ -30,7 +30,6 @@ async fn main() -> Result<()> {
 
     println!();
     println!("=== load (Vec)");
-
     PEAK_ALLOC.reset_peak_usage();
     let start = Instant::now();
     let pco_store_duration = load().await?;
@@ -39,7 +38,6 @@ async fn main() -> Result<()> {
 
     println!();
     println!("=== load (reduce)");
-
     PEAK_ALLOC.reset_peak_usage();
     let start = Instant::now();
     let pco_store_duration = load_reduce().await?;
@@ -106,7 +104,6 @@ pub async fn store() -> Result<Duration> {
         CREATE INDEX ON synthetic_pco_stores USING btree (database_id, end_at, start_at);
     ";
     db.batch_execute(sql).await?;
-
     let mut stats = Vec::new();
     for db_id in 0..100 {
         for i in 0..100_000 {
@@ -125,26 +122,17 @@ pub async fn store() -> Result<Duration> {
             });
         }
     }
-
     let start = Instant::now();
     CompressedQueryStats::store(db, stats).await?;
-
     Ok(start.elapsed())
 }
 
 pub async fn load() -> Result<Duration> {
     let db = &DB_POOL.get().await.unwrap();
     let database_ids: Vec<i64> = db.query_one("SELECT array_agg(DISTINCT database_id) FROM synthetic_pco_stores", &[]).await?.get(0);
-    let mut stats = Vec::new();
     let filter = Filter::new(&database_ids, SystemTime::UNIX_EPOCH..=SystemTime::now());
-
-    // This assumes the stats.push() call takes negligible time.
     let start = Instant::now();
-    for group in CompressedQueryStats::load(db, filter, ()).await? {
-        for stat in group.decompress()? {
-            stats.push(stat);
-        }
-    }
+    let _stats: Vec<_> = CompressedQueryStats::load(db, filter, ()).await?.collect();
     return Ok(start.elapsed());
 }
 
@@ -153,26 +141,21 @@ pub async fn load_reduce() -> Result<Duration> {
     let database_ids: Vec<i64> = db.query_one("SELECT array_agg(DISTINCT database_id) FROM synthetic_pco_stores", &[]).await?.get(0);
     let mut stats: AHashMap<(i64, i64, i64), QueryStat> = AHashMap::new();
     let filter = Filter::new(&database_ids, SystemTime::UNIX_EPOCH..=SystemTime::now());
-
     let start = Instant::now();
-    for group in CompressedQueryStats::load(db, filter, ()).await? {
-        for stat in group.decompress()? {
-            let key = (stat.database_id, stat.fingerprint, stat.postgres_role_id);
-            let entry = stats.entry(key).or_default();
-
-            entry.database_id = stat.database_id;
-            entry.collected_at = stat.collected_at;
-            entry.collected_secs += stat.collected_secs;
-            entry.fingerprint = stat.fingerprint;
-            entry.postgres_role_id = stat.postgres_role_id;
-            entry.calls += stat.calls;
-            entry.rows += stat.rows;
-            entry.total_time += stat.total_time;
-            entry.io_time += stat.io_time;
-            entry.shared_blks_hit += stat.shared_blks_hit;
-            entry.shared_blks_read += stat.shared_blks_read;
-        }
+    for stat in CompressedQueryStats::load(db, filter, ()).await? {
+        let key = (stat.database_id, stat.fingerprint, stat.postgres_role_id);
+        let entry = stats.entry(key).or_default();
+        entry.database_id = stat.database_id;
+        entry.collected_at = stat.collected_at;
+        entry.collected_secs += stat.collected_secs;
+        entry.fingerprint = stat.fingerprint;
+        entry.postgres_role_id = stat.postgres_role_id;
+        entry.calls += stat.calls;
+        entry.rows += stat.rows;
+        entry.total_time += stat.total_time;
+        entry.io_time += stat.io_time;
+        entry.shared_blks_hit += stat.shared_blks_hit;
+        entry.shared_blks_read += stat.shared_blks_read;
     }
-
     return Ok(start.elapsed());
 }
