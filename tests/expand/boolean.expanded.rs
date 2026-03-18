@@ -82,7 +82,7 @@ impl CompressedQueryStats {
                 toplevel: toplevel.get(index).cloned().unwrap_or_default() == 1,
                 calls: calls.get(index).cloned().unwrap_or_default(),
             };
-            if self.filter.as_ref().map(|f| f.filter(&row)) != Some(false) {
+            if self.filter.as_ref().map(|f| f.matches(&row)) != Some(false) {
                 results.push(row);
             }
         }
@@ -727,7 +727,7 @@ impl Filter {
             ..Self::default()
         }
     }
-    fn filter(&self, row: &QueryStat) -> bool {
+    fn matches(&self, row: &QueryStat) -> bool {
         (self.database_id.is_empty() || self.database_id.contains(&row.database_id))
             && (self.toplevel.is_empty() || self.toplevel.contains(&row.toplevel))
             && (self.calls.is_empty() || self.calls.contains(&row.calls))
