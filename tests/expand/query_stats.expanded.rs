@@ -29,6 +29,7 @@ pub struct CompressedQueryStats {
 }
 impl CompressedQueryStats {
     /// Loads data for the specified filters.
+    #[track_caller]
     pub async fn load(
         db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
         mut filter: Filter,
@@ -45,7 +46,10 @@ impl CompressedQueryStats {
             return Err(anyhow::Error::msg("collected_at".to_string() + " is required"));
         }
         filter.range_truncate()?;
-        let sql = "SELECT ".to_string() + fields.select().as_str() + " FROM "
+        let location = std::panic::Location::caller();
+        let comment = "/* line:".to_string() + location.file() + ":"
+            + location.line().to_string().as_str() + " */ ";
+        let sql = comment + "SELECT " + fields.select().as_str() + " FROM "
             + "query_stats" + " WHERE "
             + "database_id = ANY($1) AND end_at >= $2 AND start_at <= $3";
         let mut results = Vec::new();
@@ -67,6 +71,7 @@ impl CompressedQueryStats {
     /// Deletes data for the specified filters, returning it to the caller.
     ///
     /// Note that all rows are returned from [decompress][Self::decompress] even if post-decompress filters would normally apply.
+    #[track_caller]
     pub async fn delete(
         db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
         mut filter: Filter,
@@ -83,7 +88,10 @@ impl CompressedQueryStats {
             return Err(anyhow::Error::msg("collected_at".to_string() + " is required"));
         }
         filter.range_truncate()?;
-        let sql = "DELETE FROM ".to_string() + "query_stats" + " WHERE "
+        let location = std::panic::Location::caller();
+        let comment = "/* line:".to_string() + location.file() + ":"
+            + location.line().to_string().as_str() + " */ ";
+        let sql = comment + "DELETE FROM " + "query_stats" + " WHERE "
             + "database_id = ANY($1) AND end_at >= $2 AND start_at <= $3" + " RETURNING "
             + fields.select().as_str();
         let mut results = Vec::new();
@@ -198,6 +206,7 @@ impl CompressedQueryStats {
         Ok(results)
     }
     /// Writes the data to disk.
+    #[track_caller]
     pub async fn store(
         db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
         rows: Vec<QueryStat>,
@@ -209,7 +218,11 @@ impl CompressedQueryStats {
         for row in rows {
             grouped_rows.entry((row.database_id.clone(),)).or_default().push(row);
         }
-        let sql = "COPY query_stats (database_id, start_at, end_at, collected_at, collected_secs, fingerprint, postgres_role_id, calls, rows, total_time, io_time, shared_blks_hit, shared_blks_read) FROM STDIN BINARY";
+        let location = std::panic::Location::caller();
+        let comment = "/* line:".to_string() + location.file() + ":"
+            + location.line().to_string().as_str() + " */ ";
+        let sql = comment
+            + "COPY query_stats (database_id, start_at, end_at, collected_at, collected_secs, fingerprint, postgres_role_id, calls, rows, total_time, io_time, shared_blks_hit, shared_blks_read) FROM STDIN BINARY";
         let types = &[
             tokio_postgres::types::Type::INT8,
             tokio_postgres::types::Type::TIMESTAMPTZ,
@@ -319,6 +332,7 @@ impl CompressedQueryStats {
     ///
     /// This can be used to improve the compression ratio and reduce read IO, for example
     /// by compacting real-time data into a single row per hour / day / week.
+    #[track_caller]
     pub async fn store_grouped<F, R>(
         db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
         rows: Vec<QueryStat>,
@@ -338,7 +352,11 @@ impl CompressedQueryStats {
                 .or_default()
                 .push(row);
         }
-        let sql = "COPY query_stats (database_id, start_at, end_at, collected_at, collected_secs, fingerprint, postgres_role_id, calls, rows, total_time, io_time, shared_blks_hit, shared_blks_read) FROM STDIN BINARY";
+        let location = std::panic::Location::caller();
+        let comment = "/* line:".to_string() + location.file() + ":"
+            + location.line().to_string().as_str() + " */ ";
+        let sql = comment
+            + "COPY query_stats (database_id, start_at, end_at, collected_at, collected_secs, fingerprint, postgres_role_id, calls, rows, total_time, io_time, shared_blks_hit, shared_blks_read) FROM STDIN BINARY";
         let types = &[
             tokio_postgres::types::Type::INT8,
             tokio_postgres::types::Type::TIMESTAMPTZ,

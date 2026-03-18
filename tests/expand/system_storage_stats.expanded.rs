@@ -27,6 +27,7 @@ pub struct CompressedSystemStorageStats {
 }
 impl CompressedSystemStorageStats {
     /// Loads data for the specified filters.
+    #[track_caller]
     pub async fn load(
         db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
         mut filter: Filter,
@@ -49,7 +50,10 @@ impl CompressedSystemStorageStats {
             return Err(anyhow::Error::msg("collected_at".to_string() + " is required"));
         }
         filter.range_truncate()?;
-        let sql = "SELECT ".to_string() + fields.select().as_str() + " FROM "
+        let location = std::panic::Location::caller();
+        let comment = "/* line:".to_string() + location.file() + ":"
+            + location.line().to_string().as_str() + " */ ";
+        let sql = comment + "SELECT " + fields.select().as_str() + " FROM "
             + "system_storage_stats" + " WHERE "
             + "server_id = ANY($1) AND granularity = ANY($2) AND mountpoint = ANY($3) AND end_at >= $4 AND start_at <= $5";
         let mut results = Vec::new();
@@ -73,6 +77,7 @@ impl CompressedSystemStorageStats {
     /// Deletes data for the specified filters, returning it to the caller.
     ///
     /// Note that all rows are returned from [decompress][Self::decompress] even if post-decompress filters would normally apply.
+    #[track_caller]
     pub async fn delete(
         db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
         mut filter: Filter,
@@ -95,7 +100,10 @@ impl CompressedSystemStorageStats {
             return Err(anyhow::Error::msg("collected_at".to_string() + " is required"));
         }
         filter.range_truncate()?;
-        let sql = "DELETE FROM ".to_string() + "system_storage_stats" + " WHERE "
+        let location = std::panic::Location::caller();
+        let comment = "/* line:".to_string() + location.file() + ":"
+            + location.line().to_string().as_str() + " */ ";
+        let sql = comment + "DELETE FROM " + "system_storage_stats" + " WHERE "
             + "server_id = ANY($1) AND granularity = ANY($2) AND mountpoint = ANY($3) AND end_at >= $4 AND start_at <= $5"
             + " RETURNING " + fields.select().as_str();
         let mut results = Vec::new();
@@ -184,6 +192,7 @@ impl CompressedSystemStorageStats {
         Ok(results)
     }
     /// Writes the data to disk.
+    #[track_caller]
     pub async fn store(
         db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
         rows: Vec<SystemStorageStat>,
@@ -202,7 +211,11 @@ impl CompressedSystemStorageStats {
                 .or_default()
                 .push(row);
         }
-        let sql = "COPY system_storage_stats (server_id, granularity, mountpoint, start_at, end_at, collected_at, bytes_available, bytes_total, queue_depth, read_latency, write_latency) FROM STDIN BINARY";
+        let location = std::panic::Location::caller();
+        let comment = "/* line:".to_string() + location.file() + ":"
+            + location.line().to_string().as_str() + " */ ";
+        let sql = comment
+            + "COPY system_storage_stats (server_id, granularity, mountpoint, start_at, end_at, collected_at, bytes_available, bytes_total, queue_depth, read_latency, write_latency) FROM STDIN BINARY";
         let types = &[
             tokio_postgres::types::Type::UUID,
             tokio_postgres::types::Type::INT4,
@@ -287,6 +300,7 @@ impl CompressedSystemStorageStats {
     ///
     /// This can be used to improve the compression ratio and reduce read IO, for example
     /// by compacting real-time data into a single row per hour / day / week.
+    #[track_caller]
     pub async fn store_grouped<F, R>(
         db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
         rows: Vec<SystemStorageStat>,
@@ -311,7 +325,11 @@ impl CompressedSystemStorageStats {
                 .or_default()
                 .push(row);
         }
-        let sql = "COPY system_storage_stats (server_id, granularity, mountpoint, start_at, end_at, collected_at, bytes_available, bytes_total, queue_depth, read_latency, write_latency) FROM STDIN BINARY";
+        let location = std::panic::Location::caller();
+        let comment = "/* line:".to_string() + location.file() + ":"
+            + location.line().to_string().as_str() + " */ ";
+        let sql = comment
+            + "COPY system_storage_stats (server_id, granularity, mountpoint, start_at, end_at, collected_at, bytes_available, bytes_total, queue_depth, read_latency, write_latency) FROM STDIN BINARY";
         let types = &[
             tokio_postgres::types::Type::UUID,
             tokio_postgres::types::Type::INT4,
