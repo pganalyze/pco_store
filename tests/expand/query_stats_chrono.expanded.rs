@@ -193,7 +193,7 @@ impl CompressedQueryStats {
                     .cloned()
                     .unwrap_or_default(),
             };
-            if self.filter.as_ref().map(|f| f.filter(&row)) != Some(false) {
+            if self.filter.as_ref().map(|f| f.matches(&row)) != Some(false) {
                 results.push(row);
             }
         }
@@ -1838,7 +1838,7 @@ impl Filter {
             ..Self::default()
         }
     }
-    fn filter(&self, row: &QueryStat) -> bool {
+    fn matches(&self, row: &QueryStat) -> bool {
         (self.database_id.is_empty() || self.database_id.contains(&row.database_id))
             && self.collected_at.as_ref().map(|t| t.contains(&row.collected_at))
                 != Some(false)

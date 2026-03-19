@@ -311,7 +311,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
                 let len = [#compressed_field_sizes].into_iter().max().unwrap_or(0);
                 for index in 0..len {
                     let row = #name { #decompressed_fields };
-                    if self.filter.as_ref().map(|f| f.filter(&row)) != Some(false) {
+                    if self.filter.as_ref().map(|f| f.matches(&row)) != Some(false) {
                         results.push(row);
                     }
                 }
@@ -513,7 +513,7 @@ fn filter(model: ItemStruct, args: Arguments, using_chrono: bool, timestamp_ty: 
                 Self { #filter_new_names ..Self::default() }
             }
 
-            fn filter(&self, row: &#name) -> bool {
+            fn matches(&self, row: &#name) -> bool {
                 #(#filter_conditions)&&*
             }
 

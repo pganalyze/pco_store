@@ -177,7 +177,7 @@ impl CompressedSystemStorageStats {
                 write_latency: write_latency.get(index).cloned().unwrap_or_default()
                     as f64 / 100f32 as f64,
             };
-            if self.filter.as_ref().map(|f| f.filter(&row)) != Some(false) {
+            if self.filter.as_ref().map(|f| f.matches(&row)) != Some(false) {
                 results.push(row);
             }
         }
@@ -1582,7 +1582,7 @@ impl Filter {
             ..Self::default()
         }
     }
-    fn filter(&self, row: &SystemStorageStat) -> bool {
+    fn matches(&self, row: &SystemStorageStat) -> bool {
         (self.server_id.is_empty() || self.server_id.contains(&row.server_id))
             && (self.granularity.is_empty()
                 || self.granularity.contains(&row.granularity))

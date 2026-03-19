@@ -83,7 +83,7 @@ impl CompressedQueryStats {
                 total_time: total_time.get(index).cloned().unwrap_or_default() as f64
                     / 100f32 as f64,
             };
-            if self.filter.as_ref().map(|f| f.filter(&row)) != Some(false) {
+            if self.filter.as_ref().map(|f| f.matches(&row)) != Some(false) {
                 results.push(row);
             }
         }
@@ -734,7 +734,7 @@ impl Filter {
             ..Self::default()
         }
     }
-    fn filter(&self, row: &QueryStat) -> bool {
+    fn matches(&self, row: &QueryStat) -> bool {
         (self.database_id.is_empty() || self.database_id.contains(&row.database_id))
             && (self.calls.is_empty() || self.calls.contains(&row.calls))
             && (self.total_time.is_empty() || self.total_time.contains(&row.total_time))
