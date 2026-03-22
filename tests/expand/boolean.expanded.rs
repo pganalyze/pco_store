@@ -13,6 +13,7 @@ pub struct CompressedQueryStats {
 }
 impl CompressedQueryStats {
     /// Loads data for the specified filters.
+    #[track_caller]
     pub async fn load(
         db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
         mut filter: Filter,
@@ -25,7 +26,10 @@ impl CompressedQueryStats {
         if filter.database_id.is_empty() {
             return Err(anyhow::Error::msg("database_id".to_string() + " is required"));
         }
-        let sql = "SELECT ".to_string() + fields.select().as_str() + " FROM "
+        let location = std::panic::Location::caller();
+        let comment = "/* line:".to_string() + location.file() + ":"
+            + location.line().to_string().as_str() + " */ ";
+        let sql = comment + "SELECT " + fields.select().as_str() + " FROM "
             + "query_stats" + " WHERE " + "database_id = ANY($1)";
         let mut results = Vec::new();
         for row in db
@@ -39,6 +43,7 @@ impl CompressedQueryStats {
     /// Deletes data for the specified filters, returning it to the caller.
     ///
     /// Note that all rows are returned from [decompress][Self::decompress] even if post-decompress filters would normally apply.
+    #[track_caller]
     pub async fn delete(
         db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
         mut filter: Filter,
@@ -51,7 +56,10 @@ impl CompressedQueryStats {
         if filter.database_id.is_empty() {
             return Err(anyhow::Error::msg("database_id".to_string() + " is required"));
         }
-        let sql = "DELETE FROM ".to_string() + "query_stats" + " WHERE "
+        let location = std::panic::Location::caller();
+        let comment = "/* line:".to_string() + location.file() + ":"
+            + location.line().to_string().as_str() + " */ ";
+        let sql = comment + "DELETE FROM " + "query_stats" + " WHERE "
             + "database_id = ANY($1)" + " RETURNING " + fields.select().as_str();
         let mut results = Vec::new();
         for row in db
@@ -89,6 +97,7 @@ impl CompressedQueryStats {
         Ok(results)
     }
     /// Writes the data to disk.
+    #[track_caller]
     pub async fn store(
         db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
         rows: Vec<QueryStat>,
@@ -100,7 +109,11 @@ impl CompressedQueryStats {
         for row in rows {
             grouped_rows.entry((row.database_id.clone(),)).or_default().push(row);
         }
-        let sql = "COPY query_stats (database_id, toplevel, calls) FROM STDIN BINARY";
+        let location = std::panic::Location::caller();
+        let comment = "/* line:".to_string() + location.file() + ":"
+            + location.line().to_string().as_str() + " */ ";
+        let sql = comment
+            + "COPY query_stats (database_id, toplevel, calls) FROM STDIN BINARY";
         let types = &[
             tokio_postgres::types::Type::INT8,
             tokio_postgres::types::Type::BYTEA,
@@ -140,6 +153,7 @@ impl CompressedQueryStats {
     ///
     /// This can be used to improve the compression ratio and reduce read IO, for example
     /// by compacting real-time data into a single row per hour / day / week.
+    #[track_caller]
     pub async fn store_grouped<F, R>(
         db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
         rows: Vec<QueryStat>,
@@ -159,7 +173,11 @@ impl CompressedQueryStats {
                 .or_default()
                 .push(row);
         }
-        let sql = "COPY query_stats (database_id, toplevel, calls) FROM STDIN BINARY";
+        let location = std::panic::Location::caller();
+        let comment = "/* line:".to_string() + location.file() + ":"
+            + location.line().to_string().as_str() + " */ ";
+        let sql = comment
+            + "COPY query_stats (database_id, toplevel, calls) FROM STDIN BINARY";
         let types = &[
             tokio_postgres::types::Type::INT8,
             tokio_postgres::types::Type::BYTEA,

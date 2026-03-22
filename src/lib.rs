@@ -269,6 +269,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
 
         impl #packed_name {
             /// Loads data for the specified filters.
+            #[track_caller]
             pub async fn load(
                 db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
                 mut filter: Filter,
@@ -277,7 +278,9 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
                 let mut fields = fields.try_into().map_err(|_| anyhow::Error::msg("unknown field"))?;
                 fields.merge_filter(&filter);
                 #load_checks
-                let sql = "SELECT ".to_string() + fields.select().as_str() + " FROM " + #table_name + " WHERE " + #load_where;
+                let location = std::panic::Location::caller();
+                let comment = "/* line:".to_string() + location.file() + ":" + location.line().to_string().as_str() + " */ ";
+                let sql = comment + "SELECT " + fields.select().as_str() + " FROM " + #table_name + " WHERE " + #load_where;
                 let mut results = Vec::new();
                 for row in db.query(&db.prepare_cached(&sql).await?, &[#load_params]).await? {
                     results.push(fields.load_from_row(row, Some(filter.clone()))?);
@@ -288,6 +291,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
             /// Deletes data for the specified filters, returning it to the caller.
             ///
             /// Note that all rows are returned from [decompress][Self::decompress] even if post-decompress filters would normally apply.
+            #[track_caller]
             pub async fn delete(
                 db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
                 mut filter: Filter,
@@ -296,7 +300,9 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
                 let mut fields = fields.try_into().map_err(|_| anyhow::Error::msg("unknown field"))?;
                 fields.merge_filter(&filter);
                 #load_checks
-                let sql = "DELETE FROM ".to_string() + #table_name + " WHERE " + #load_where + " RETURNING " + fields.select().as_str();
+                let location = std::panic::Location::caller();
+                let comment = "/* line:".to_string() + location.file() + ":" + location.line().to_string().as_str() + " */ ";
+                let sql = comment + "DELETE FROM " + #table_name + " WHERE " + #load_where + " RETURNING " + fields.select().as_str();
                 let mut results = Vec::new();
                 for row in db.query(&db.prepare_cached(&sql).await?, &[#load_params]).await? {
                     results.push(fields.load_from_row(row, None)?);
@@ -319,6 +325,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
             }
 
             /// Writes the data to disk.
+            #[track_caller]
             pub async fn store(db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>, rows: Vec<#name>) -> anyhow::Result<()> {
                 if rows.is_empty() {
                     return Ok(());
@@ -327,7 +334,9 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
                 for row in rows {
                     grouped_rows.entry((#store_group)).or_default().push(row);
                 }
-                let sql = #store_sql;
+                let location = std::panic::Location::caller();
+                let comment = "/* line:".to_string() + location.file() + ":" + location.line().to_string().as_str() + " */ ";
+                let sql = comment + #store_sql;
                 let types = &[#store_types];
                 let stmt = db.copy_in(&db.prepare_cached(&sql).await?).await?;
                 let writer = tokio_postgres::binary_copy::BinaryCopyInWriter::new(stmt, types);
@@ -344,6 +353,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
             ///
             /// This can be used to improve the compression ratio and reduce read IO, for example
             /// by compacting real-time data into a single row per hour / day / week.
+            #[track_caller]
             pub async fn store_grouped<F, R>(
                 db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
                 rows: Vec<#name>,
@@ -360,7 +370,9 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
                 for row in rows {
                     grouped_rows.entry((#store_group grouping(&row))).or_default().push(row);
                 }
-                let sql = #store_sql;
+                let location = std::panic::Location::caller();
+                let comment = "/* line:".to_string() + location.file() + ":" + location.line().to_string().as_str() + " */ ";
+                let sql = comment + #store_sql;
                 let types = &[#store_types];
                 let stmt = db.copy_in(&db.prepare_cached(&sql).await?).await?;
                 let writer = tokio_postgres::binary_copy::BinaryCopyInWriter::new(stmt, types);
