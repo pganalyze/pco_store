@@ -122,16 +122,18 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
     let load_params = tokens(load_params);
 
     // decompress
+    let mut decompress_field_names = vec![quote! { filter, }];
     let mut decompress_fields = Vec::new();
-    let mut compressed_field_sizes = Vec::new();
+    let mut decompress_fields_first = None;
     let mut decompressed_fields = Vec::new();
     for field in model.fields.iter() {
         let ident = field.ident.clone().unwrap();
         let ty_original = field.ty.clone();
         let mut ty = field.ty.clone();
         let round_float_field = float_round.is_some() && quote! { #ty }.to_string().starts_with("f");
+        decompress_field_names.push(quote! { #ident, });
         if group_by.iter().any(|i| *i == ident) {
-            decompressed_fields.push(quote! { #ident: self.#ident.clone(), });
+            decompressed_fields.push(quote! { #ident: #ident.clone(), });
         } else {
             if timestamp.as_ref().map(|t| *t == ident).unwrap_or(false) {
                 ty = Type::Verbatim(quote! { u64 });
@@ -143,21 +145,25 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
                 ty = Type::Verbatim(quote! { u16 });
             }
             decompress_fields.push(quote! {
-                let #ident: Vec<#ty> = if self.#ident.is_empty() {
+                let mut #ident: std::vec::IntoIter<#ty> = if #ident.is_empty() {
                     Vec::new()
                 } else {
-                    ::pco::standalone::simple_decompress(&self.#ident)?
-                };
+                    ::pco::standalone::simple_decompress(&#ident)?
+                }.into_iter();
             });
-            compressed_field_sizes.push(quote! { #ident.len(), });
+            let value = if decompress_fields_first.is_none() {
+                quote! { #ident }
+            } else {
+                quote! { #ident.next().unwrap_or_default() }
+            };
             if timestamp.as_ref().map(|t| *t == ident).unwrap_or(false) {
                 let value = if using_chrono {
                     quote! {
-                        chrono::DateTime::from_timestamp_micros(#ident[index] as i64).unwrap()
+                        chrono::DateTime::from_timestamp_micros(#value as i64).unwrap()
                     }
                 } else {
                     quote! {
-                        std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_micros(#ident[index])
+                        std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_micros(#value)
                     }
                 };
                 decompressed_fields.push(quote! {
@@ -165,21 +171,24 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
                 });
             } else if round_float_field {
                 decompressed_fields.push(quote! {
-                    #ident: #ident.get(index).cloned().unwrap_or_default() as #ty_original / #float_round as #ty_original,
+                    #ident: #value as #ty_original / #float_round as #ty_original,
                 });
             } else if quote! { #ty_original }.to_string() == "bool" {
                 decompressed_fields.push(quote! {
-                    #ident: #ident.get(index).cloned().unwrap_or_default() == 1,
+                    #ident: #value == 1,
                 });
             } else {
                 decompressed_fields.push(quote! {
-                    #ident: #ident.get(index).cloned().unwrap_or_default(),
+                    #ident: #value,
                 });
+            }
+            if decompress_fields_first.is_none() {
+                decompress_fields_first = Some(ident.clone());
             }
         }
     }
+    let decompress_field_names = tokens(decompress_field_names);
     let decompress_fields = tokens(decompress_fields);
-    let compressed_field_sizes = tokens(compressed_field_sizes);
     let decompressed_fields = tokens(decompressed_fields);
 
     // store
@@ -212,7 +221,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
             store_types.push(Ident::new("BYTEA", Span::call_site()));
             store_values.push(quote! {
                 &start_at, &end_at,
-                &::pco::standalone::simpler_compress(&#timestamp, ::pco::DEFAULT_COMPRESSION_LEVEL).unwrap(),
+                &::pco::standalone::simple_compress(&#timestamp, &Default::default()).unwrap(),
             });
         } else {
             store_fields.push(ident.to_string());
@@ -225,8 +234,8 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
                 quote! { r.#ident }
             };
             store_values.push(quote! {
-                &::pco::standalone::simpler_compress(
-                    &rows.iter().map(|r| #expr).collect::<Vec<_>>(), ::pco::DEFAULT_COMPRESSION_LEVEL
+                &::pco::standalone::simple_compress(
+                    &rows.iter().map(|r| #expr).collect::<Vec<_>>(), &Default::default()
                 ).unwrap(),
             });
         }
@@ -273,7 +282,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
                 db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
                 mut filter: Filter,
                 fields: impl TryInto<Fields>
-            ) -> anyhow::Result<Vec<#packed_name>> {
+            ) -> anyhow::Result<impl Iterator<Item = anyhow::Result<#name>>> {
                 let mut fields = fields.try_into().map_err(|_| anyhow::Error::msg("unknown field"))?;
                 fields.merge_filter(&filter);
                 #load_checks
@@ -282,7 +291,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
                 for row in db.query(&db.prepare_cached(&sql).await?, &[#load_params]).await? {
                     results.push(fields.load_from_row(row, Some(filter.clone()))?);
                 }
-                Ok(results)
+                QueryStatsIterator::new(results)
             }
 
             /// Deletes data for the specified filters, returning it to the caller.
@@ -292,7 +301,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
                 db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
                 mut filter: Filter,
                 fields: impl TryInto<Fields>
-            ) -> anyhow::Result<Vec<#packed_name>> {
+            ) -> anyhow::Result<impl Iterator<Item = anyhow::Result<#name>>> {
                 let mut fields = fields.try_into().map_err(|_| anyhow::Error::msg("unknown field"))?;
                 fields.merge_filter(&filter);
                 #load_checks
@@ -301,21 +310,19 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
                 for row in db.query(&db.prepare_cached(&sql).await?, &[#load_params]).await? {
                     results.push(fields.load_from_row(row, None)?);
                 }
-                Ok(results)
+                QueryStatsIterator::new(results)
             }
 
             /// Decompresses a group of data points.
-            pub fn decompress(self) -> anyhow::Result<Vec<#name>> {
-                let mut results = Vec::new();
+            fn decompress(self) -> anyhow::Result<impl Iterator<Item = #name>> {
+                let Self {
+                    #decompress_field_names
+                } = self;
                 #decompress_fields
-                let len = [#compressed_field_sizes].into_iter().max().unwrap_or(0);
-                for index in 0..len {
+                Ok(#decompress_fields_first.filter_map(move |#decompress_fields_first| {
                     let row = #name { #decompressed_fields };
-                    if self.filter.as_ref().map(|f| f.matches(&row)) != Some(false) {
-                        results.push(row);
-                    }
-                }
-                Ok(results)
+                    (filter.as_ref().map(|f| f.matches(&row)) != Some(false)).then(|| row)
+                }))
             }
 
             /// Writes the data to disk.
@@ -373,6 +380,38 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
                 Ok(())
             }
         }
+
+struct QueryStatsIterator {
+    groups: std::vec::IntoIter<#packed_name>,
+    buffer: std::collections::VecDeque<#name>,
+}
+impl QueryStatsIterator {
+    fn new(groups: Vec<#packed_name>) -> anyhow::Result<Self> {
+        Ok(Self { groups: groups.into_iter(), buffer: Default::default() })
+    }
+}
+impl Iterator for QueryStatsIterator {
+    type Item = anyhow::Result<#name>;
+    fn next(&mut self) -> Option<Self::Item> {
+        if let Some(stat) = self.buffer.pop_front() {
+            return Some(Ok(stat));
+        }
+        while let Some(group) = self.groups.next() {
+            match group.decompress() {
+                Ok(stats) => {
+                    self.buffer.extend(stats);
+                    if let Some(stat) = self.buffer.pop_front() {
+                        return Some(Ok(stat));
+                    }
+                }
+                Err(e) => return Some(Err(e)),
+            }
+        }
+        None
+    }
+}
+
+
 
         #filter
         #fields

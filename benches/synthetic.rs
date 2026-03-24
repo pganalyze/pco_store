@@ -135,16 +135,11 @@ pub async fn store() -> Result<Duration> {
 pub async fn load() -> Result<Duration> {
     let db = &DB_POOL.get().await.unwrap();
     let database_ids: Vec<i64> = db.query_one("SELECT array_agg(DISTINCT database_id) FROM synthetic_pco_stores", &[]).await?.get(0);
-    let mut stats = Vec::new();
     let filter = Filter::new(&database_ids, SystemTime::UNIX_EPOCH..=SystemTime::now());
 
     // This assumes the stats.push() call takes negligible time.
     let start = Instant::now();
-    for group in CompressedQueryStats::load(db, filter, ()).await? {
-        for stat in group.decompress()? {
-            stats.push(stat);
-        }
-    }
+    let _stats: Vec<QueryStat> = CompressedQueryStats::load(db, filter, ()).await?.collect::<Result<_>>()?;
     return Ok(start.elapsed());
 }
 
@@ -155,23 +150,22 @@ pub async fn load_reduce() -> Result<Duration> {
     let filter = Filter::new(&database_ids, SystemTime::UNIX_EPOCH..=SystemTime::now());
 
     let start = Instant::now();
-    for group in CompressedQueryStats::load(db, filter, ()).await? {
-        for stat in group.decompress()? {
-            let key = (stat.database_id, stat.fingerprint, stat.postgres_role_id);
-            let entry = stats.entry(key).or_default();
+    for stat in CompressedQueryStats::load(db, filter, ()).await? {
+        let stat = stat?;
+        let key = (stat.database_id, stat.fingerprint, stat.postgres_role_id);
+        let entry = stats.entry(key).or_default();
 
-            entry.database_id = stat.database_id;
-            entry.collected_at = stat.collected_at;
-            entry.collected_secs += stat.collected_secs;
-            entry.fingerprint = stat.fingerprint;
-            entry.postgres_role_id = stat.postgres_role_id;
-            entry.calls += stat.calls;
-            entry.rows += stat.rows;
-            entry.total_time += stat.total_time;
-            entry.io_time += stat.io_time;
-            entry.shared_blks_hit += stat.shared_blks_hit;
-            entry.shared_blks_read += stat.shared_blks_read;
-        }
+        entry.database_id = stat.database_id;
+        entry.collected_at = stat.collected_at;
+        entry.collected_secs += stat.collected_secs;
+        entry.fingerprint = stat.fingerprint;
+        entry.postgres_role_id = stat.postgres_role_id;
+        entry.calls += stat.calls;
+        entry.rows += stat.rows;
+        entry.total_time += stat.total_time;
+        entry.io_time += stat.io_time;
+        entry.shared_blks_hit += stat.shared_blks_hit;
+        entry.shared_blks_read += stat.shared_blks_read;
     }
 
     return Ok(start.elapsed());
