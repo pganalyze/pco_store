@@ -9,6 +9,7 @@ use super::filter::*;
 use super::*;
 
 mod load;
+mod delete;
 
 pub fn generate(args: Arguments, model: ItemStruct, item: proc_macro2::TokenStream) -> TokenStream {
     let Arguments { timestamp, group_by, float_round, table_name } = args.clone();
@@ -215,6 +216,7 @@ pub fn generate(args: Arguments, model: ItemStruct, item: proc_macro2::TokenStre
     let deserialize_time_range = timestamp_ty.map(|t| deserialize_time_range(&t));
 
     let load = self::load::generate(&packed_name, &table_name, &load_checks, &load_where, &load_params);
+    let delete = self::delete::generate(&packed_name, &table_name, &load_checks, &load_where, &load_params);
 
     quote! {
         use serde::Deserialize as _;
@@ -229,24 +231,7 @@ pub fn generate(args: Arguments, model: ItemStruct, item: proc_macro2::TokenStre
         impl #packed_name {
             #load
 
-            /// Deletes data for the specified filters, returning it to the caller.
-            ///
-            /// Note that all rows are returned from [decompress][Self::decompress] even if post-decompress filters would normally apply.
-            pub async fn delete(
-                db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
-                mut filter: Filter,
-                fields: impl TryInto<Fields>
-            ) -> anyhow::Result<Vec<#packed_name>> {
-                let mut fields = fields.try_into().map_err(|_| anyhow::Error::msg("unknown field"))?;
-                fields.merge_filter(&filter);
-                #load_checks
-                let sql = "DELETE FROM ".to_string() + #table_name + " WHERE " + #load_where + " RETURNING " + fields.select().as_str();
-                let mut results = Vec::new();
-                for row in db.query(&db.prepare_cached(&sql).await?, &[#load_params]).await? {
-                    results.push(fields.load_from_row(row, None)?);
-                }
-                Ok(results)
-            }
+            #delete
 
             /// Decompresses a group of data points.
             pub fn decompress(self) -> anyhow::Result<Vec<#name>> {
