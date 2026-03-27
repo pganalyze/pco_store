@@ -3,10 +3,12 @@ use proc_macro2::Span;
 use quote::{ToTokens, quote};
 use syn::{Ident, ItemStruct, Type};
 
-use super::*;
 use super::deserialize_time_range::*;
 use super::fields::*;
 use super::filter::*;
+use super::*;
+
+mod load;
 
 pub fn generate(args: Arguments, model: ItemStruct, item: proc_macro2::TokenStream) -> TokenStream {
     let Arguments { timestamp, group_by, float_round, table_name } = args.clone();
@@ -212,6 +214,8 @@ pub fn generate(args: Arguments, model: ItemStruct, item: proc_macro2::TokenStre
     let fields = fields(model, args, packed_name.clone());
     let deserialize_time_range = timestamp_ty.map(|t| deserialize_time_range(&t));
 
+    let load = self::load::generate(&packed_name, &table_name, &load_checks, &load_where, &load_params);
+
     quote! {
         use serde::Deserialize as _;
 
@@ -223,22 +227,7 @@ pub fn generate(args: Arguments, model: ItemStruct, item: proc_macro2::TokenStre
         }
 
         impl #packed_name {
-            /// Loads data for the specified filters.
-            pub async fn load(
-                db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
-                mut filter: Filter,
-                fields: impl TryInto<Fields>
-            ) -> anyhow::Result<Vec<#packed_name>> {
-                let mut fields = fields.try_into().map_err(|_| anyhow::Error::msg("unknown field"))?;
-                fields.merge_filter(&filter);
-                #load_checks
-                let sql = "SELECT ".to_string() + fields.select().as_str() + " FROM " + #table_name + " WHERE " + #load_where;
-                let mut results = Vec::new();
-                for row in db.query(&db.prepare_cached(&sql).await?, &[#load_params]).await? {
-                    results.push(fields.load_from_row(row, Some(filter.clone()))?);
-                }
-                Ok(results)
-            }
+            #load
 
             /// Deletes data for the specified filters, returning it to the caller.
             ///
