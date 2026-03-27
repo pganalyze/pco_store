@@ -8,9 +8,9 @@ use super::fields::*;
 use super::filter::*;
 use super::*;
 
-mod load;
-mod delete;
 mod decompress;
+mod delete;
+mod load;
 mod store;
 
 pub fn generate(args: Arguments, model: ItemStruct, item: proc_macro2::TokenStream) -> TokenStream {

@@ -2,7 +2,8 @@ use quote::quote;
 use syn::Ident;
 
 pub fn generate(
-    name: &Ident, store_group: &proc_macro2::TokenStream, store_sql: &str, store_types: &proc_macro2::TokenStream, timestamp_collect: &proc_macro2::TokenStream, store_values: &proc_macro2::TokenStream,
+    name: &Ident, store_group: &proc_macro2::TokenStream, store_sql: &str, store_types: &proc_macro2::TokenStream,
+    timestamp_collect: &proc_macro2::TokenStream, store_values: &proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
     quote! {
         /// Writes the data to disk.

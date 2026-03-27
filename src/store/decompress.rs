@@ -2,7 +2,8 @@ use quote::quote;
 use syn::Ident;
 
 pub fn generate(
-    name: &Ident, decompress_fields: &proc_macro2::TokenStream, compressed_field_sizes: &proc_macro2::TokenStream, decompressed_fields: &proc_macro2::TokenStream,
+    name: &Ident, decompress_fields: &proc_macro2::TokenStream, compressed_field_sizes: &proc_macro2::TokenStream,
+    decompressed_fields: &proc_macro2::TokenStream,
 ) -> proc_macro2::TokenStream {
     quote! {
         /// Decompresses a group of data points.
