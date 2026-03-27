@@ -10,6 +10,7 @@ use super::*;
 
 mod load;
 mod delete;
+mod decompress;
 
 pub fn generate(args: Arguments, model: ItemStruct, item: proc_macro2::TokenStream) -> TokenStream {
     let Arguments { timestamp, group_by, float_round, table_name } = args.clone();
@@ -217,6 +218,7 @@ pub fn generate(args: Arguments, model: ItemStruct, item: proc_macro2::TokenStre
 
     let load = self::load::generate(&packed_name, &table_name, &load_checks, &load_where, &load_params);
     let delete = self::delete::generate(&packed_name, &table_name, &load_checks, &load_where, &load_params);
+    let decompress = self::decompress::generate(&name, &decompress_fields, &compressed_field_sizes, &decompressed_fields);
 
     quote! {
         use serde::Deserialize as _;
@@ -233,19 +235,7 @@ pub fn generate(args: Arguments, model: ItemStruct, item: proc_macro2::TokenStre
 
             #delete
 
-            /// Decompresses a group of data points.
-            pub fn decompress(self) -> anyhow::Result<Vec<#name>> {
-                let mut results = Vec::new();
-                #decompress_fields
-                let len = [#compressed_field_sizes].into_iter().max().unwrap_or(0);
-                for index in 0..len {
-                    let row = #name { #decompressed_fields };
-                    if self.filter.as_ref().map(|f| f.matches(&row)) != Some(false) {
-                        results.push(row);
-                    }
-                }
-                Ok(results)
-            }
+            #decompress
 
             /// Writes the data to disk.
             pub async fn store(db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>, rows: Vec<#name>) -> anyhow::Result<()> {
