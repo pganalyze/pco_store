@@ -11,6 +11,7 @@ use super::*;
 mod load;
 mod delete;
 mod decompress;
+mod store;
 
 pub fn generate(args: Arguments, model: ItemStruct, item: proc_macro2::TokenStream) -> TokenStream {
     let Arguments { timestamp, group_by, float_round, table_name } = args.clone();
@@ -219,6 +220,7 @@ pub fn generate(args: Arguments, model: ItemStruct, item: proc_macro2::TokenStre
     let load = self::load::generate(&packed_name, &table_name, &load_checks, &load_where, &load_params);
     let delete = self::delete::generate(&packed_name, &table_name, &load_checks, &load_where, &load_params);
     let decompress = self::decompress::generate(&name, &decompress_fields, &compressed_field_sizes, &decompressed_fields);
+    let store_and_store_grouped = self::store::generate(&name, &store_group, &store_sql, &store_types, &timestamp_collect, &store_values);
 
     quote! {
         use serde::Deserialize as _;
@@ -237,60 +239,7 @@ pub fn generate(args: Arguments, model: ItemStruct, item: proc_macro2::TokenStre
 
             #decompress
 
-            /// Writes the data to disk.
-            pub async fn store(db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>, rows: Vec<#name>) -> anyhow::Result<()> {
-                if rows.is_empty() {
-                    return Ok(());
-                }
-                let mut grouped_rows: ahash::AHashMap<_, Vec<#name>> = ahash::AHashMap::new();
-                for row in rows {
-                    grouped_rows.entry((#store_group)).or_default().push(row);
-                }
-                let sql = #store_sql;
-                let types = &[#store_types];
-                let stmt = db.copy_in(&db.prepare_cached(&sql).await?).await?;
-                let writer = tokio_postgres::binary_copy::BinaryCopyInWriter::new(stmt, types);
-                futures::pin_mut!(writer);
-                for rows in grouped_rows.into_values() {
-                    #timestamp_collect
-                    writer.as_mut().write(&[#store_values]).await?;
-                }
-                writer.finish().await?;
-                Ok(())
-            }
-
-            /// Writes the data to disk, with the provided grouping closure applied.
-            ///
-            /// This can be used to improve the compression ratio and reduce read IO, for example
-            /// by compacting real-time data into a single row per hour / day / week.
-            pub async fn store_grouped<F, R>(
-                db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
-                rows: Vec<#name>,
-                grouping: F,
-            ) -> anyhow::Result<()>
-            where
-                F: Fn(&#name) -> R,
-                R: Eq + std::hash::Hash,
-            {
-                if rows.is_empty() {
-                    return Ok(());
-                }
-                let mut grouped_rows: ahash::AHashMap<_, Vec<#name>> = ahash::AHashMap::new();
-                for row in rows {
-                    grouped_rows.entry((#store_group grouping(&row))).or_default().push(row);
-                }
-                let sql = #store_sql;
-                let types = &[#store_types];
-                let stmt = db.copy_in(&db.prepare_cached(&sql).await?).await?;
-                let writer = tokio_postgres::binary_copy::BinaryCopyInWriter::new(stmt, types);
-                futures::pin_mut!(writer);
-                for rows in grouped_rows.into_values() {
-                    #timestamp_collect
-                    writer.as_mut().write(&[#store_values]).await?;
-                }
-                writer.finish().await?;
-                Ok(())
-            }
+            #store_and_store_grouped
         }
 
         #filter
