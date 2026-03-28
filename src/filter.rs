@@ -3,7 +3,7 @@ use syn::{ItemStruct, Type};
 
 use super::{Arguments, tokens};
 
-pub fn filter(model: ItemStruct, args: Arguments, using_chrono: bool, timestamp_ty: &Option<Type>) -> proc_macro2::TokenStream {
+pub fn generate(model: ItemStruct, args: Arguments, using_chrono: bool, timestamp_ty: &Option<Type>) -> proc_macro2::TokenStream {
     let name = model.ident.clone();
     let Arguments { timestamp, group_by, .. } = args;
     let mut filter_fields = Vec::new();

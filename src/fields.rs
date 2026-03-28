@@ -3,7 +3,7 @@ use syn::{Ident, ItemStruct};
 
 use super::{Arguments, tokens};
 
-pub fn fields(model: ItemStruct, args: Arguments, packed_name: Ident) -> proc_macro2::TokenStream {
+pub fn generate(model: ItemStruct, args: Arguments, packed_name: Ident) -> proc_macro2::TokenStream {
     let name = model.ident.clone();
     let Arguments { timestamp, group_by, .. } = args;
     let mut fields = Vec::new();

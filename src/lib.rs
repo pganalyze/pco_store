@@ -5,14 +5,8 @@ use syn::parse::{Parse, ParseStream};
 use syn::{Ident, ItemStruct, Lit, Result, Token, bracketed, parse_macro_input};
 
 mod deserialize_time_range;
-use deserialize_time_range::*;
-
 mod fields;
-use fields::*;
-
 mod filter;
-use filter::*;
-
 mod store;
 mod decompress;
 mod delete;
@@ -137,9 +131,9 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
     let load_params = tokens(load_params);
 
 
-    let filter = filter(model.clone(), args.clone(), using_chrono, &timestamp_ty);
-    let fields = fields(model.clone(), args.clone(), packed_name.clone());
-    let deserialize_time_range = timestamp_ty.map(|t| deserialize_time_range(&t));
+    let filter = filter::generate(model.clone(), args.clone(), using_chrono, &timestamp_ty);
+    let fields = fields::generate(model.clone(), args.clone(), packed_name.clone());
+    let deserialize_time_range = timestamp_ty.map(|t| deserialize_time_range::generate(&t));
 
     let load = load::generate(&packed_name, &table_name, &load_checks, &load_where, &load_params);
     let delete = delete::generate(&packed_name, &table_name, &load_checks, &load_where, &load_params);

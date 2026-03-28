@@ -1,7 +1,7 @@
 use quote::quote;
 use syn::Type;
 
-pub fn deserialize_time_range(timestamp_ty: &Type) -> proc_macro2::TokenStream {
+pub fn generate(timestamp_ty: &Type) -> proc_macro2::TokenStream {
     quote! {
         /// Deserializes many different time range formats:
         /// - an array with two strings becomes a normal time range: ["a", "b"] -> a..=b
