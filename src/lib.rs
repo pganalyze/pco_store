@@ -63,7 +63,6 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
     let Arguments { timestamp, group_by, float_round, table_name } = args.clone();
     let model = parse_macro_input!(i as ItemStruct);
     let item = proc_macro2::TokenStream::from(item);
-
     let name = model.ident.clone();
     let packed_name = Ident::new(&format!("Compressed{}s", model.ident), Span::call_site());
 

@@ -1,7 +1,6 @@
+use super::*;
 use quote::quote;
 use syn::{ItemStruct, Type};
-
-use super::*;
 
 pub fn generate(
     model: &ItemStruct, timestamp: &Option<Ident>, group_by: &Vec<Ident>, float_round: Option<f32>, _table_name: &str, using_chrono: bool,

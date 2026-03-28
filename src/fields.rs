@@ -1,7 +1,6 @@
+use super::{Arguments, tokens};
 use quote::quote;
 use syn::{Ident, ItemStruct};
-
-use super::{Arguments, tokens};
 
 pub fn generate(model: ItemStruct, args: Arguments, packed_name: Ident) -> proc_macro2::TokenStream {
     let name = model.ident.clone();
