@@ -113,25 +113,25 @@ pub fn generate(
         where
             F: Fn(&#name) -> R,
             R: Eq + std::hash::Hash,
-            {
-                if rows.is_empty() {
-                    return Ok(());
-                }
-                let mut grouped_rows: ahash::AHashMap<_, Vec<#name>> = ahash::AHashMap::new();
-                for row in rows {
-                    grouped_rows.entry((#store_group grouping(&row))).or_default().push(row);
-                }
-                let sql = #store_sql;
-                let types = &[#store_types];
-                let stmt = db.copy_in(&db.prepare_cached(&sql).await?).await?;
-                let writer = tokio_postgres::binary_copy::BinaryCopyInWriter::new(stmt, types);
-                futures::pin_mut!(writer);
-                for rows in grouped_rows.into_values() {
-                    #timestamp_collect
-                    writer.as_mut().write(&[#store_values]).await?;
-                }
-                writer.finish().await?;
-                Ok(())
+        {
+            if rows.is_empty() {
+                return Ok(());
             }
+            let mut grouped_rows: ahash::AHashMap<_, Vec<#name>> = ahash::AHashMap::new();
+            for row in rows {
+                grouped_rows.entry((#store_group grouping(&row))).or_default().push(row);
+            }
+            let sql = #store_sql;
+            let types = &[#store_types];
+            let stmt = db.copy_in(&db.prepare_cached(&sql).await?).await?;
+            let writer = tokio_postgres::binary_copy::BinaryCopyInWriter::new(stmt, types);
+            futures::pin_mut!(writer);
+            for rows in grouped_rows.into_values() {
+                #timestamp_collect
+                writer.as_mut().write(&[#store_values]).await?;
+            }
+            writer.finish().await?;
+            Ok(())
+        }
     }
 }
