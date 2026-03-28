@@ -1,5 +1,5 @@
 use quote::quote;
-use syn::ItemStruct;
+use syn::{ItemStruct, Type};
 
 use super::*;
 
