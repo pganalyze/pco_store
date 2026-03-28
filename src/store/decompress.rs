@@ -3,11 +3,11 @@ use syn::ItemStruct;
 
 use super::*;
 
-pub fn generate(args: &Arguments, model: &ItemStruct, using_chrono: bool) -> proc_macro2::TokenStream {
-    let Arguments { timestamp, group_by, float_round, table_name: _ } = args.clone();
+pub fn generate(
+    model: &ItemStruct, timestamp: &Option<Ident>, group_by: &Vec<Ident>, float_round: Option<f32>, _table_name: &str, using_chrono: bool
+) -> proc_macro2::TokenStream {
     let name = model.ident.clone();
 
-    // decompress
     let mut decompress_fields = Vec::new();
     let mut compressed_field_sizes = Vec::new();
     let mut decompressed_fields = Vec::new();
