@@ -5,7 +5,7 @@ use syn::{Ident, ItemStruct, Type};
 use super::*;
 
 pub fn generate(
-    model: &ItemStruct, timestamp: &Option<Ident>, group_by: &Vec<Ident>, float_round: Option<f32>, table_name: &str, using_chrono: bool
+    model: &ItemStruct, timestamp: &Option<Ident>, group_by: &Vec<Ident>, float_round: Option<f32>, table_name: &str, using_chrono: bool,
 ) -> proc_macro2::TokenStream {
     let name = model.ident.clone();
 
@@ -78,8 +78,6 @@ pub fn generate(
         quote! {}
     };
     let store_sql = format!("COPY {table_name} ({store_fields}) FROM STDIN BINARY");
-
-
 
     quote! {
         /// Writes the data to disk.

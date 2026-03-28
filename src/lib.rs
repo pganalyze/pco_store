@@ -4,13 +4,13 @@ use quote::{ToTokens, quote};
 use syn::parse::{Parse, ParseStream};
 use syn::{Ident, ItemStruct, Lit, Result, Token, bracketed, parse_macro_input};
 
+mod decompress;
+mod delete;
 mod deserialize_time_range;
 mod fields;
 mod filter;
-mod store;
-mod decompress;
-mod delete;
 mod load;
+mod store;
 
 #[derive(Clone)]
 struct Arguments {
@@ -130,7 +130,6 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
     let load_where = if load_where.is_empty() { "true".to_string() } else { load_where.join(" AND ") };
     let load_params = tokens(load_params);
 
-
     let filter = filter::generate(model.clone(), args.clone(), using_chrono, &timestamp_ty);
     let fields = fields::generate(model.clone(), args.clone(), packed_name.clone());
     let deserialize_time_range = timestamp_ty.map(|t| deserialize_time_range::generate(&t));
@@ -165,7 +164,6 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
         #deserialize_time_range
     }
     .into()
-
 }
 
 fn copy_type(rust_type: String) -> &'static str {
