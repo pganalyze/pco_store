@@ -5,7 +5,6 @@ use syn::parse::{Parse, ParseStream};
 use syn::{Ident, ItemStruct, Lit, Result, Token, bracketed, parse_macro_input};
 
 mod decompress;
-mod delete;
 mod deserialize_time_range;
 mod fields;
 mod filter;
@@ -80,61 +79,29 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
         table_name
     };
 
-    // load and delete
     let mut packed_fields = vec![quote! { filter: Option<Filter>, }];
-    let mut load_checks = Vec::new();
-    let mut load_where = Vec::new();
-    let mut load_params = Vec::new();
-    let mut bind = 1;
     let mut timestamp_ty = None;
     let mut using_chrono = false;
     for field in model.fields.iter() {
         let ident = field.ident.clone().unwrap();
         let ty = field.ty.clone();
-        let name = format!("{ident}");
         if group_by.iter().any(|i| *i == ident) {
             packed_fields.push(quote! { #ident: #ty, });
-            load_checks.push(quote! {
-                if filter.#ident.is_empty() {
-                    return Err(anyhow::Error::msg(#name.to_string() + " is required"));
-                }
-            });
-            load_where.push(format!("{ident} = ANY(${bind})"));
-            bind += 1;
-            load_params.push(quote! { &filter.#ident, });
         } else if timestamp.as_ref().map(|t| *t == ident).unwrap_or(false) {
             using_chrono = !ty.to_token_stream().to_string().contains("SystemTime");
             timestamp_ty = Some(ty.clone());
             packed_fields.push(quote! { #ident: Vec<u8>, });
-            load_checks.push(quote! {
-                if filter.#ident.is_none() {
-                    return Err(anyhow::Error::msg(#name.to_string() + " is required"));
-                }
-                filter.range_truncate()?;
-            });
-            load_where.push(format!("end_at >= ${bind}"));
-            bind += 1;
-            load_where.push(format!("start_at <= ${bind}"));
-            bind += 1;
-            load_params.push(quote! {
-                filter.#ident.as_ref().unwrap().start(),
-                filter.#ident.as_ref().unwrap().end(),
-            });
         } else {
             packed_fields.push(quote! { #ident: Vec<u8>, });
         }
     }
     let packed_fields = tokens(packed_fields);
-    let load_checks = tokens(load_checks);
-    let load_where = if load_where.is_empty() { "true".to_string() } else { load_where.join(" AND ") };
-    let load_params = tokens(load_params);
 
     let filter = filter::generate(model.clone(), args.clone(), using_chrono, &timestamp_ty);
     let fields = fields::generate(model.clone(), args.clone(), packed_name.clone());
     let deserialize_time_range = timestamp_ty.map(|t| deserialize_time_range::generate(&t));
 
-    let load = load::generate(&packed_name, &table_name, &load_checks, &load_where, &load_params);
-    let delete = delete::generate(&packed_name, &table_name, &load_checks, &load_where, &load_params);
+    let load_and_delete = load::generate(&model, &timestamp, &group_by, &packed_name, &table_name);
     let decompress = decompress::generate(&model, &timestamp, &group_by, float_round, &table_name, using_chrono);
     let store_and_store_grouped = store::generate(&model, &timestamp, &group_by, float_round, &table_name, using_chrono);
 
@@ -149,9 +116,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
         }
 
         impl #packed_name {
-            #load
-
-            #delete
+            #load_and_delete
 
             #decompress
 
