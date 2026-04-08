@@ -50,6 +50,14 @@ Now with the optimized data model, this benchmark compares the performance of us
 
 ## Others
 
+### `serialization.rs`
+
+This compares various serialization formats for several data types. Findings:
+
+- for numeric data, pco has >3x better compressed size and >5x faster deserialization, but serialization uses 2x more memory
+- serde deserialization is >5x faster than facet_postcard, and the other metrics are similar enough to not matter
+- maps are best stored as `BTreeMap` or `IndexMap` because `HashMap`'s random hasher hurts compression
+
 ### `chrono.rs`
 
 The standard library `SystemTime` is being used depsite [chrono's](https://crates.io/crates/chrono) more feature-complete API because adding durations to a timestamp (in `decompress`) is noticeably slower when using chrono.
