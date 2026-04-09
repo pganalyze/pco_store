@@ -13,15 +13,15 @@ To see the generated code, look in [tests/expand](tests/expand) or run `cargo ex
 
 pco supports `u16`, `u32`, `u64`, `i16`, `i32`, `i64`, `f16`, `f32`, `f64`
 
-pco_store converts these data types into numbers in order to use pco compression:
-- `chrono::DateTime`, `std::time::SystemTime`
+pco_store converts these data types into numbers so they can be compressed with pco:
+- `chrono::DateTime` and `std::time::SystemTime`, stored as microsecond offsets from the Unix epoch
+- `Vec<{number}>`, stored as a flat array with the length of each nested array for later rebuilding the nested structure
 - `bool`
 
 Any other serde-compatible data type will be serialized with MessagePack and compressed with zstd. Note:
 - At read time, these fields are incrementally decompressed to reduce peak memory usage, assuming the provided filter discards most rows
 - Maps should use `BTreeMap` or `IndexMap` instead of `HashMap`, because random key order hurts compression
 - MessagePack doesn't support adding new fields to tuples, so changing a field's type from `(bool)` to `(bool, i32)` will break. Use a struct to avoid this issue
-- A future breaking change will flatten `Vec<{number}>` so they can be pco-compressed
 - A future breaking change will compress UUIDs stored as a non-`group_by` field, assuming timestamp-prefixed UUIDs are used and so can be pco-compressed
 
 ## Performance

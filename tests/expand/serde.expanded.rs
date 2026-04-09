@@ -763,7 +763,8 @@ impl CompressedSerdes {
         };
         let mut description = serde_decompress::<String>(&self.description);
         let mut tags = serde_decompress::<Vec<String>>(&self.tags);
-        let mut nums = serde_decompress::<Vec<i32>>(&self.nums);
+        let mut nums: std::vec::IntoIter<Vec<i32>> = pco_decompress_nested(self.nums)?
+            .into_iter();
         let mut map = serde_decompress::<BTreeMap<String, String>>(&self.map);
         let mut json = serde_decompress::<serde_json::Value>(&self.json);
         let mut model = serde_decompress::<Option<Box<Serde>>>(&self.model);
@@ -778,7 +779,7 @@ impl CompressedSerdes {
                     .unwrap(),
                 description: description.next().transpose()?.unwrap_or_default(),
                 tags: tags.next().transpose()?.unwrap_or_default(),
-                nums: nums.next().transpose()?.unwrap_or_default(),
+                nums: nums.next().unwrap_or_default(),
                 map: map.next().transpose()?.unwrap_or_default(),
                 json: json.next().transpose()?.unwrap_or_default(),
                 model: model.next().transpose()?.unwrap_or_default(),
@@ -855,8 +856,11 @@ impl CompressedSerdes {
                         &serde_compress(
                             rows.iter().map(|r| r.tags.clone()).collect::<Vec<_>>(),
                         )?,
-                        &serde_compress(
-                            rows.iter().map(|r| r.nums.clone()).collect::<Vec<_>>(),
+                        &pco_compress_nested(
+                            rows
+                                .iter()
+                                .map(|r| r.nums.iter().map(|v| *v).collect::<Vec<_>>())
+                                .collect::<Vec<_>>(),
                         )?,
                         &serde_compress(
                             rows.iter().map(|r| r.map.clone()).collect::<Vec<_>>(),
@@ -948,8 +952,11 @@ impl CompressedSerdes {
                         &serde_compress(
                             rows.iter().map(|r| r.tags.clone()).collect::<Vec<_>>(),
                         )?,
-                        &serde_compress(
-                            rows.iter().map(|r| r.nums.clone()).collect::<Vec<_>>(),
+                        &pco_compress_nested(
+                            rows
+                                .iter()
+                                .map(|r| r.nums.iter().map(|v| *v).collect::<Vec<_>>())
+                                .collect::<Vec<_>>(),
                         )?,
                         &serde_compress(
                             rows.iter().map(|r| r.map.clone()).collect::<Vec<_>>(),
@@ -2568,4 +2575,42 @@ where
             Err(e) => Some(Err(e.into())),
         }),
     )
+}
+fn pco_compress_nested<T>(nested_values: Vec<Vec<T>>) -> anyhow::Result<Vec<u8>>
+where
+    T: ::pco::data_types::Number,
+{
+    let mut lengths = Vec::new();
+    let mut values = Vec::new();
+    for vals in nested_values {
+        lengths.push(vals.len() as u64);
+        values.extend(vals);
+    }
+    let length_bytes = ::pco::standalone::simpler_compress(
+        &lengths,
+        ::pco::DEFAULT_COMPRESSION_LEVEL,
+    )?;
+    let value_bytes = ::pco::standalone::simpler_compress(
+        &values,
+        ::pco::DEFAULT_COMPRESSION_LEVEL,
+    )?;
+    let (length_bytes, value_bytes) = (
+        serde_bytes::Bytes::new(&length_bytes),
+        serde_bytes::Bytes::new(&value_bytes),
+    );
+    Ok(rmp_serde::to_vec(&(length_bytes, value_bytes))?)
+}
+fn pco_decompress_nested<T>(bytes: Vec<u8>) -> anyhow::Result<Vec<Vec<T>>>
+where
+    T: ::pco::data_types::Number,
+{
+    let (length_bytes, value_bytes): (Vec<u8>, Vec<u8>) = rmp_serde::from_slice(&bytes)?;
+    let lengths = ::pco::standalone::simple_decompress::<u64>(&length_bytes)?;
+    let values = ::pco::standalone::simple_decompress::<T>(&value_bytes)?;
+    let mut values = values.into_iter();
+    let mut nested_values = Vec::with_capacity(lengths.len());
+    for length in lengths {
+        nested_values.push(values.by_ref().take(length as usize).collect::<Vec<T>>());
+    }
+    Ok(nested_values)
 }

@@ -136,7 +136,23 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
 fn is_number(ty: &Type) -> bool {
     let ty = quote! { #ty }.to_string();
     match ty.as_str() {
-        "u8" | "u16" | "u32" | "u64" | "i8" | "i16" | "i32" | "i64" | "f32" | "f64" | "bool" => true,
+        "u8" | "u16" | "u32" | "u64" => true,
+        "i8" | "i16" | "i32" | "i64" => true,
+        "f32" | "f64" => true,
+        "bool" => true,
+        _ => false,
+    }
+}
+
+fn is_nested_number(ty: &Type) -> bool {
+    let ty = quote! { #ty }.to_string();
+    // Remove syn's added spacing, turning "Vec < i32 >" into "Vec<i32>"
+    let ty = ty.replace(" < ", "<").replace(" >", ">");
+    match ty.as_str() {
+        "Vec<u8>" | "Vec<u16>" | "Vec<u32>" | "Vec<u64>" => true,
+        "Vec<i8>" | "Vec<i16>" | "Vec<i32>" | "Vec<i64>" => true,
+        "Vec<f32>" | "Vec<f64>" => true,
+        "Vec<bool>" => true,
         _ => false,
     }
 }
