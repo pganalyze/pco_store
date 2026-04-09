@@ -50,6 +50,16 @@ Now with the optimized data model, this benchmark compares the performance of us
 
 ## Others
 
+### `serialization.rs`
+
+This compares serialization formats for several data types. Observations:
+
+- For numeric data, pco has >3x better compressed size and >5x faster deserialization, but serialization uses 2x more memory
+- For nested numeric data like `Vec<Vec<i64>>`, pco can achieve similar compression ratios by flattening the data and storing the length of each nested array in order to rebuild the nested structure later
+- CBOR is slightly better than JSON at compressed size and serialization time, and is much more efficient at encoding binary data
+- MessagePack improves on CBOR with faster deserialization, and with similar compressed size
+- Maps are best stored as `BTreeMap` or `IndexMap` because `HashMap`'s random key order hurts compression
+
 ### `chrono.rs`
 
 The standard library `SystemTime` is being used depsite [chrono's](https://crates.io/crates/chrono) more feature-complete API because adding durations to a timestamp (in `decompress`) is noticeably slower when using chrono.
