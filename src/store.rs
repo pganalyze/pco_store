@@ -39,36 +39,34 @@ pub fn generate(
                 &start_at, &end_at,
                 &::pco::standalone::simpler_compress(&#timestamp, ::pco::DEFAULT_COMPRESSION_LEVEL).unwrap(),
             });
-        } else if is_number(&ty) {
+        } else if is_number(&ty) || is_nested_number(&ty) {
             store_fields.push(ident.to_string());
             store_types.push(Ident::new("BYTEA", Span::call_site()));
-            let expr = if round_float_field {
-                quote! { (r.#ident * #float_round as #ty_original).round() as i64 }
-            } else if quote! { #ty_original }.to_string() == "bool" {
-                quote! { r.#ident as u16 }
-            } else {
+            let val = if is_number(&ty) {
                 quote! { r.#ident }
-            };
-            store_values.push(quote! {
-                &::pco::standalone::simpler_compress(
-                    &rows.iter().map(|r| #expr).collect::<Vec<_>>(), ::pco::DEFAULT_COMPRESSION_LEVEL
-                )?,
-            });
-        } else if is_nested_number(&ty) {
-            store_fields.push(ident.to_string());
-            store_types.push(Ident::new("BYTEA", Span::call_site()));
-            let expr = if round_float_field {
-                quote! { (v * #float_round as #ty_original).round() as i64 }
-            } else if quote! { #ty_original }.to_string() == "bool" {
-                quote! { v as u16 }
             } else {
-                quote! { v }
+                quote! { v } // Closure argument inside of nested `map`
             };
-            store_values.push(quote! {
-                &pco_compress_nested(
-                    rows.iter().map(|r| r.#ident.iter().map(|v| *#expr).collect::<Vec<_>>()).collect::<Vec<_>>()
-                )?,
-            });
+            let expr = if round_float_field {
+                quote! { (#val * #float_round as #ty_original).round() as i64 }
+            } else if quote! { #ty_original }.to_string() == "bool" {
+                quote! { #val as u16 }
+            } else {
+                quote! { #val }
+            };
+            if is_number(&ty) {
+                store_values.push(quote! {
+                    &::pco::standalone::simpler_compress(
+                        &rows.iter().map(|r| #expr).collect::<Vec<_>>(), ::pco::DEFAULT_COMPRESSION_LEVEL
+                    )?,
+                });
+            } else {
+                store_values.push(quote! {
+                    &pco_compress_nested(
+                        rows.iter().map(|r| r.#ident.iter().map(|v| *#expr).collect::<Vec<_>>()).collect::<Vec<_>>()
+                    )?,
+                });
+            }
         } else {
             store_fields.push(ident.to_string());
             store_types.push(Ident::new("BYTEA", Span::call_site()));
