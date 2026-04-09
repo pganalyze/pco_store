@@ -36,6 +36,10 @@ pub fn generate(
                     };
                 });
                 compressed_field_sizes.push(quote! { #ident.len(), });
+            } else if is_nested_number(&ty) {
+                decompress_fields.push(quote! {
+                    let mut #ident: std::vec::IntoIter<#ty> = pco_decompress_nested(self.#ident)?.into_iter();
+                });
             } else {
                 decompress_fields.push(quote! {
                     let mut #ident = serde_decompress::<#ty>(&self.#ident);
@@ -43,6 +47,8 @@ pub fn generate(
             }
             let value = if is_number(&ty) {
                 quote! { #ident.get(index).cloned().unwrap_or_default() }
+            } else if is_nested_number(&ty) {
+                quote! { #ident.next().unwrap_or_default() }
             } else {
                 quote! { #ident.next().transpose()?.unwrap_or_default() }
             };

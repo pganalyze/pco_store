@@ -56,11 +56,13 @@ async fn string() -> anyhow::Result<()> {
         db.batch_execute(sql).await?;
 
         let a =
-            Model { id, name: "a".into(), description: "desc".into(), tags: vec!["y".into(), "z".into()], nums: vec![9, 10], ..Default::default() };
+            Model { id, name: "a".into(), description: "desc".into(), tags: vec!["x".into(), "y".into()], nums: vec![8, 9], ..Default::default() };
         let a1 = Model { id, time: t, ..a.clone() };
         let a2 = Model {
             id,
             time: t2,
+            tags: vec!["x".into(), "y".into(), "z".into()],
+            nums: vec![8, 9, 10],
             description: "other".into(),
             map: [("k".into(), "v".into())].into(),
             json: json!(null),
