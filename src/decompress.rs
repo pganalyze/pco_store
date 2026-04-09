@@ -27,22 +27,33 @@ pub fn generate(
             if quote! { #ty_original }.to_string() == "bool" {
                 ty = Type::Verbatim(quote! { u16 });
             }
-            decompress_fields.push(quote! {
-                let #ident: Vec<#ty> = if self.#ident.is_empty() {
-                    Vec::new()
-                } else {
-                    ::pco::standalone::simple_decompress(&self.#ident)?
-                };
-            });
-            compressed_field_sizes.push(quote! { #ident.len(), });
+            if is_number(&ty) {
+                decompress_fields.push(quote! {
+                    let #ident: Vec<#ty> = if self.#ident.is_empty() {
+                        Vec::new()
+                    } else {
+                        ::pco::standalone::simple_decompress(&self.#ident)?
+                    };
+                });
+                compressed_field_sizes.push(quote! { #ident.len(), });
+            } else {
+                decompress_fields.push(quote! {
+                    let mut #ident = serde_decompress::<#ty>(&self.#ident);
+                });
+            }
+            let value = if is_number(&ty) {
+                quote! { #ident.get(index).cloned().unwrap_or_default() }
+            } else {
+                quote! { #ident.next().transpose()?.unwrap_or_default() }
+            };
             if timestamp.as_ref().map(|t| *t == ident).unwrap_or(false) {
                 let value = if using_chrono {
                     quote! {
-                        chrono::DateTime::from_timestamp_micros(#ident[index] as i64).unwrap()
+                        chrono::DateTime::from_timestamp_micros(#value as i64).unwrap()
                     }
                 } else {
                     quote! {
-                        std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_micros(#ident[index])
+                        std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_micros(#value)
                     }
                 };
                 decompressed_fields.push(quote! {
@@ -50,15 +61,15 @@ pub fn generate(
                 });
             } else if round_float_field {
                 decompressed_fields.push(quote! {
-                    #ident: #ident.get(index).cloned().unwrap_or_default() as #ty_original / #float_round as #ty_original,
+                    #ident: #value as #ty_original / #float_round as #ty_original,
                 });
             } else if quote! { #ty_original }.to_string() == "bool" {
                 decompressed_fields.push(quote! {
-                    #ident: #ident.get(index).cloned().unwrap_or_default() == 1,
+                    #ident: #value == 1,
                 });
             } else {
                 decompressed_fields.push(quote! {
-                    #ident: #ident.get(index).cloned().unwrap_or_default(),
+                    #ident: #value,
                 });
             }
         }

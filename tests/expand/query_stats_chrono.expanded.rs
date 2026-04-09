@@ -174,7 +174,7 @@ impl CompressedQueryStats {
             let row = QueryStat {
                 database_id: self.database_id.clone(),
                 collected_at: chrono::DateTime::from_timestamp_micros(
-                        collected_at[index] as i64,
+                        collected_at.get(index).cloned().unwrap_or_default() as i64,
                     )
                     .unwrap(),
                 collected_secs: collected_secs.get(index).cloned().unwrap_or_default(),
@@ -255,56 +255,41 @@ impl CompressedQueryStats {
                             )
                             .unwrap(),
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.collected_secs).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.collected_secs).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.fingerprint).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.fingerprint).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows
-                                    .iter()
-                                    .map(|r| r.postgres_role_id)
-                                    .collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.postgres_role_id).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.calls).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.calls).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.rows).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.rows).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.total_time).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.total_time).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.io_time).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.io_time).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.shared_blks_hit).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.shared_blks_hit).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows
-                                    .iter()
-                                    .map(|r| r.shared_blks_read)
-                                    .collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.shared_blks_read).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                     ],
                 )
                 .await?;
@@ -379,56 +364,41 @@ impl CompressedQueryStats {
                             )
                             .unwrap(),
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.collected_secs).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.collected_secs).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.fingerprint).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.fingerprint).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows
-                                    .iter()
-                                    .map(|r| r.postgres_role_id)
-                                    .collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.postgres_role_id).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.calls).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.calls).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.rows).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.rows).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.total_time).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.total_time).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.io_time).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.io_time).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows.iter().map(|r| r.shared_blks_hit).collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.shared_blks_hit).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                         &::pco::standalone::simpler_compress(
-                                &rows
-                                    .iter()
-                                    .map(|r| r.shared_blks_read)
-                                    .collect::<Vec<_>>(),
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
-                            )
-                            .unwrap(),
+                            &rows.iter().map(|r| r.shared_blks_read).collect::<Vec<_>>(),
+                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                        )?,
                     ],
                 )
                 .await?;
@@ -2275,4 +2245,40 @@ impl<'de> serde::de::Visitor<'de> for TimeRangeVisitor {
     {
         Ok(TimeRange(None))
     }
+}
+fn serde_compress<T>(items: Vec<T>) -> anyhow::Result<Vec<u8>>
+where
+    T: serde::Serialize,
+{
+    use std::io::Write;
+    let mut output = Vec::new();
+    let mut encoder = zstd::stream::write::Encoder::new(&mut output, 3)?;
+    for item in items {
+        rmp_serde::encode::write(&mut encoder, &item)?;
+    }
+    encoder.finish()?;
+    Ok(output)
+}
+fn serde_decompress<T>(input: &[u8]) -> impl Iterator<Item = anyhow::Result<T>> + '_
+where
+    T: for<'de> serde::Deserialize<'de> + 'static,
+{
+    let decoder = match zstd::stream::read::Decoder::new(input) {
+        Ok(d) => d,
+        Err(e) => {
+            return Box::new(std::iter::once(Err(e.into())))
+                as Box<dyn Iterator<Item = _>>;
+        }
+    };
+    let buffered = std::io::BufReader::with_capacity(128 * 1024, decoder);
+    let mut de = rmp_serde::decode::Deserializer::new(buffered);
+    Box::new(
+        std::iter::from_fn(move || match serde::Deserialize::deserialize(&mut de) {
+            Ok(item) => Some(Ok(item)),
+            Err(
+                rmp_serde::decode::Error::InvalidMarkerRead(ref e),
+            ) if e.kind() == std::io::ErrorKind::UnexpectedEof => None,
+            Err(e) => Some(Err(e.into())),
+        }),
+    )
 }

@@ -7,6 +7,7 @@ use std::time::{Duration, SystemTime};
 mod chrono_tests;
 mod fields_tests;
 mod filter_tests;
+mod serde_tests;
 
 #[test]
 fn macrotest() {

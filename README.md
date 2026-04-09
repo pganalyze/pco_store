@@ -13,11 +13,16 @@ To see the generated code, look in [tests/expand](tests/expand) or run `cargo ex
 
 pco supports `u16`, `u32`, `u64`, `i16`, `i32`, `i64`, `f16`, `f32`, `f64`
 
-pco_store extends that with support for:
+pco_store converts these data types into numbers in order to use pco compression:
 - `chrono::DateTime`, `std::time::SystemTime`
 - `bool`
-- `uuid::Uuid` (only as a `group_by` field)
-- `String` (only as a `group_by` field)
+
+Any other serde-compatible data type will be serialized with MessagePack and compressed with zstd. Note:
+- At read time, these fields are incrementally decompressed to reduce peak memory usage, assuming the provided filter discards most rows
+- Maps should use `BTreeMap` or `IndexMap` instead of `HashMap`, because random key order hurts compression
+- MessagePack doesn't support adding new fields to tuples, so changing a field's type from `(bool)` to `(bool, i32)` will break. Use a struct to avoid this issue
+- A future breaking change will flatten `Vec<{number}>` so they can be pco-compressed
+- A future breaking change will compress UUIDs stored as a non-`group_by` field, assuming timestamp-prefixed UUIDs are used and so can be pco-compressed
 
 ## Performance
 
@@ -205,10 +210,7 @@ Note that when optional filters are combined with `Fields::required()`, the fiel
 
 ## Contributions are welcome to
 
-- support decompression of only the fields requested at runtime
 - support other storage models (filesystem, S3, etc)
-- support compression for other data types (text, enums, etc)
-- add a stream/generator API to avoid allocating Vecs when loading data
 - [add `copy_in` support to deadpool_postgres and tokio_postgres `GenericClient`](https://github.com/deadpool-rs/deadpool/issues/397)
 
 ## Other crates
