@@ -39,7 +39,7 @@ pub fn generate(
                 &start_at, &end_at,
                 &::pco::standalone::simpler_compress(&#timestamp, ::pco::DEFAULT_COMPRESSION_LEVEL).unwrap(),
             });
-        } else {
+        } else if is_number(&ty) {
             store_fields.push(ident.to_string());
             store_types.push(Ident::new("BYTEA", Span::call_site()));
             let expr = if round_float_field {
@@ -52,7 +52,13 @@ pub fn generate(
             store_values.push(quote! {
                 &::pco::standalone::simpler_compress(
                     &rows.iter().map(|r| #expr).collect::<Vec<_>>(), ::pco::DEFAULT_COMPRESSION_LEVEL
-                ).unwrap(),
+                )?,
+            });
+        } else {
+            store_fields.push(ident.to_string());
+            store_types.push(Ident::new("BYTEA", Span::call_site()));
+            store_values.push(quote! {
+                &serde_compress(rows.iter().map(|r| r.#ident.clone()).collect::<Vec<_>>())?,
             });
         }
     }
@@ -70,8 +76,7 @@ pub fn generate(
             let #timestamp: Vec<_> = rows.iter().map(|s| s.#timestamp).collect();
             let start_at = *#timestamp.iter().min().unwrap();
             let end_at = *#timestamp.iter().max().unwrap();
-            let #timestamp: Vec<u64> = #timestamp.into_iter().map(|t|
-                #map_inner).collect();
+            let #timestamp: Vec<u64> = #timestamp.into_iter().map(|t| #map_inner).collect();
         }
     } else {
         quote! {}
@@ -133,5 +138,18 @@ pub fn generate(
             writer.finish().await?;
             Ok(())
         }
+    }
+}
+
+fn copy_type(rust_type: String) -> &'static str {
+    match rust_type.as_str() {
+        "f32" => "FLOAT4",
+        "f64" => "FLOAT8",
+        "i32" => "INT4",
+        "i64" => "INT8",
+        "SystemTime" => "TIMESTAMPTZ",
+        "String" => "TEXT",
+        "Uuid" => "UUID",
+        _ => panic!("unsupported copy_type {rust_type:?}"),
     }
 }

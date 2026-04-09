@@ -2,13 +2,14 @@ use proc_macro::TokenStream;
 use proc_macro2::Span;
 use quote::{ToTokens, quote};
 use syn::parse::{Parse, ParseStream};
-use syn::{Ident, ItemStruct, Lit, Result, Token, bracketed, parse_macro_input};
+use syn::{Ident, ItemStruct, Lit, Result, Token, Type, bracketed, parse_macro_input};
 
 mod decompress;
 mod deserialize_time_range;
 mod fields;
 mod filter;
 mod load;
+mod serde;
 mod store;
 
 #[derive(Clone)]
@@ -104,6 +105,7 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
     let load_and_delete = load::generate(&model, &timestamp, &group_by, &packed_name, &table_name);
     let decompress = decompress::generate(&model, &timestamp, &group_by, float_round, &table_name, using_chrono);
     let store_and_store_grouped = store::generate(&model, &timestamp, &group_by, float_round, &table_name, using_chrono);
+    let serde = serde::generate();
 
     quote! {
         use serde::Deserialize as _;
@@ -126,20 +128,16 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
         #filter
         #fields
         #deserialize_time_range
+        #serde
     }
     .into()
 }
 
-fn copy_type(rust_type: String) -> &'static str {
-    match rust_type.as_str() {
-        "f32" => "FLOAT4",
-        "f64" => "FLOAT8",
-        "i32" => "INT4",
-        "i64" => "INT8",
-        "SystemTime" => "TIMESTAMPTZ",
-        "String" => "TEXT",
-        "Uuid" => "UUID",
-        _ => panic!("unsupported copy_type {rust_type:?}"),
+fn is_number(ty: &Type) -> bool {
+    let ty = quote! { #ty }.to_string();
+    match ty.as_str() {
+        "u8" | "u16" | "u32" | "u64" | "i8" | "i16" | "i32" | "i64" | "f32" | "f64" | "bool" => true,
+        _ => false,
     }
 }
 
