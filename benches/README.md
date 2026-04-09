@@ -52,12 +52,13 @@ Now with the optimized data model, this benchmark compares the performance of us
 
 ### `serialization.rs`
 
-This compares various serialization formats for several data types. Findings:
+This compares serialization formats for several data types. Observations:
 
-- for numeric data, pco has >3x better compressed size and >5x faster deserialization, but serialization uses 2x more memory
-- for nested numeric data like `Vec<Vec<i64>>`, pco can achieve similar compression ratios by flattening the data and storing the length of each nested array in order to rebuild the nested structure later
-- serde deserialization is >5x faster than facet_postcard, and the other metrics are similar enough to not matter
-- maps are best stored as `BTreeMap` or `IndexMap` because `HashMap`'s random hasher hurts compression
+- For numeric data, pco has >3x better compressed size and >5x faster deserialization, but serialization uses 2x more memory
+- For nested numeric data like `Vec<Vec<i64>>`, pco can achieve similar compression ratios by flattening the data and storing the length of each nested array in order to rebuild the nested structure later
+- CBOR is slightly better than JSON at compressed size and serialization time, and is much more efficient at encoding binary data
+- MessagePack improves on CBOR with faster deserialization, and with similar compressed size
+- Maps are best stored as `BTreeMap` or `IndexMap` because `HashMap`'s random key order hurts compression
 
 ### `chrono.rs`
 

@@ -12,28 +12,39 @@ fn main() {
     println!();
     bench_pco(numbers(), "i64");
     bench_serde(numbers(), "i64");
-    bench_facet(numbers(), "i64");
+    bench_msgpack(numbers(), "i64");
+    bench_cbor(numbers(), "i64");
     println!();
-    bench_flat_pco(numbers_nested(), "Vec<u64> + Vec<i64> (flattened)");
+    bench_flat_serde(numbers_nested(), "Vec<u64> + Vec<i64> (flattened)");
+    bench_flat_msgpack(numbers_nested(), "Vec<u64> + Vec<i64> (flattened)");
+    bench_flat_cbor(numbers_nested(), "Vec<u64> + Vec<i64> (flattened)");
     bench_serde(numbers_nested(), "Vec<i64>");
-    bench_facet(numbers_nested(), "Vec<i64>");
+    bench_msgpack(numbers_nested(), "Vec<i64>");
+    bench_cbor(numbers_nested(), "Vec<i64>");
     println!();
     bench_serde(strings(), "String");
-    bench_facet(strings(), "String");
+    bench_msgpack(strings(), "String");
+    bench_cbor(strings(), "String");
     println!();
     bench_serde(serde_values(), "serde_json::Value");
-    bench_facet(facet_values(), "facet_value::Value");
+    bench_msgpack(serde_values(), "serde_json::Value");
+    bench_cbor(serde_values(), "serde_json::Value");
     println!();
     bench_serde(hashmap(), "HashMap<String, String>");
-    bench_facet(hashmap(), "HashMap<String, String>");
+    bench_msgpack(hashmap(), "HashMap<String, String>");
+    bench_cbor(hashmap(), "HashMap<String, String>");
     println!();
     bench_serde(btreemap(), "BTreeMap<String, String>");
-    bench_facet(btreemap(), "BTreeMap<String, String>");
+    bench_msgpack(btreemap(), "BTreeMap<String, String>");
+    bench_cbor(btreemap(), "BTreeMap<String, String>");
     println!();
     bench_serde(indexmap(), "IndexMap<String, String>");
+    bench_msgpack(indexmap(), "IndexMap<String, String>");
+    bench_cbor(indexmap(), "IndexMap<String, String>");
     println!();
     bench_serde(structs(), "Struct");
-    bench_facet(structs(), "Struct");
+    bench_msgpack(structs(), "Struct");
+    bench_cbor(structs(), "Struct");
     println!();
 }
 
@@ -53,7 +64,7 @@ where
     println!("deserialized and retained after {:.1?} using {:.0?}KB peak memory", start.elapsed(), PEAK_ALLOC.peak_usage_as_kb());
 }
 
-fn bench_flat_pco<T>(nested_values: Vec<Vec<T>>, r#type: &str)
+fn bench_flat_serde<T>(nested_values: Vec<Vec<T>>, r#type: &str)
 where
     T: pco::data_types::Number,
 {
@@ -63,16 +74,17 @@ where
         lengths.push(value.len() as u64);
         values.extend(value);
     }
-    println!("== pco {type}");
+    println!("== pco + serde {type}");
     PEAK_ALLOC.reset_peak_usage();
     let start = Instant::now();
     let length_bytes = pco::standalone::simpler_compress(&lengths, pco::DEFAULT_COMPRESSION_LEVEL).unwrap();
     let value_bytes = pco::standalone::simpler_compress(&values, pco::DEFAULT_COMPRESSION_LEVEL).unwrap();
-    let bytes = encode_nested_vec(length_bytes, value_bytes);
+    let (length_bytes, value_bytes) = (serde_bytes::Bytes::new(&length_bytes), serde_bytes::Bytes::new(&value_bytes));
+    let bytes = serde_json::to_vec(&(length_bytes, value_bytes)).unwrap();
     println!("serialized to {:.0?} bytes after {:.1?} using {:.0?}KB peak memory", bytes.len(), start.elapsed(), PEAK_ALLOC.peak_usage_as_kb());
     PEAK_ALLOC.reset_peak_usage();
     let start = Instant::now();
-    let (length_bytes, value_bytes) = decode_nested_vec(&bytes).unwrap();
+    let (length_bytes, value_bytes) = serde_json::from_slice::<(Vec<u8>, Vec<u8>)>(&bytes).unwrap();
     let lengths = pco::standalone::simple_decompress::<u64>(&length_bytes).unwrap();
     let values = pco::standalone::simple_decompress::<T>(&value_bytes).unwrap();
     let mut values = values.into_iter();
@@ -84,21 +96,69 @@ where
     println!("deserialized and retained after {:.1?} using {:.0?}KB peak memory", start.elapsed(), PEAK_ALLOC.peak_usage_as_kb());
 }
 
-fn encode_nested_vec(v1: Vec<u8>, v2: Vec<u8>) -> Vec<u8> {
-    let mut out = Vec::with_capacity(8 + v1.len() + 8 + v2.len());
-    out.extend_from_slice(&(v1.len() as u64).to_le_bytes());
-    out.extend(v1);
-    out.extend_from_slice(&(v2.len() as u64).to_le_bytes());
-    out.extend(v2);
-    out
+fn bench_flat_msgpack<T>(nested_values: Vec<Vec<T>>, r#type: &str)
+where
+    T: pco::data_types::Number,
+{
+    let mut lengths = Vec::new();
+    let mut values = Vec::new();
+    for value in nested_values {
+        lengths.push(value.len() as u64);
+        values.extend(value);
+    }
+    println!("== pco + msgpack {type}");
+    PEAK_ALLOC.reset_peak_usage();
+    let start = Instant::now();
+    let length_bytes = pco::standalone::simpler_compress(&lengths, pco::DEFAULT_COMPRESSION_LEVEL).unwrap();
+    let value_bytes = pco::standalone::simpler_compress(&values, pco::DEFAULT_COMPRESSION_LEVEL).unwrap();
+    let (length_bytes, value_bytes) = (serde_bytes::Bytes::new(&length_bytes), serde_bytes::Bytes::new(&value_bytes));
+    let bytes = rmp_serde::to_vec(&(length_bytes, value_bytes)).unwrap();
+    println!("serialized to {:.0?} bytes after {:.1?} using {:.0?}KB peak memory", bytes.len(), start.elapsed(), PEAK_ALLOC.peak_usage_as_kb());
+    PEAK_ALLOC.reset_peak_usage();
+    let start = Instant::now();
+    let (length_bytes, value_bytes) = rmp_serde::from_slice::<(Vec<u8>, Vec<u8>)>(&bytes).unwrap();
+    let lengths = pco::standalone::simple_decompress::<u64>(&length_bytes).unwrap();
+    let values = pco::standalone::simple_decompress::<T>(&value_bytes).unwrap();
+    let mut values = values.into_iter();
+    let mut combined = Vec::with_capacity(lengths.len());
+    for length in lengths {
+        combined.push(values.by_ref().take(length as usize).collect::<Vec<T>>());
+    }
+    black_box(combined);
+    println!("deserialized and retained after {:.1?} using {:.0?}KB peak memory", start.elapsed(), PEAK_ALLOC.peak_usage_as_kb());
 }
 
-fn decode_nested_vec(data: &[u8]) -> Result<(&[u8], &[u8]), &'static str> {
-    let len1 = u64::from_le_bytes(data[0..8].try_into().unwrap()) as usize;
-    let vec1 = &data[8..8 + len1];
-    let len2 = u64::from_le_bytes(data[8 + len1..16 + len1].try_into().unwrap()) as usize;
-    let vec2 = &data[16 + len1..16 + len1 + len2];
-    Ok((vec1, vec2))
+fn bench_flat_cbor<T>(nested_values: Vec<Vec<T>>, r#type: &str)
+where
+    T: pco::data_types::Number,
+{
+    let mut lengths = Vec::new();
+    let mut values = Vec::new();
+    for value in nested_values {
+        lengths.push(value.len() as u64);
+        values.extend(value);
+    }
+    println!("== pco + cbor {type}");
+    PEAK_ALLOC.reset_peak_usage();
+    let start = Instant::now();
+    let length_bytes = pco::standalone::simpler_compress(&lengths, pco::DEFAULT_COMPRESSION_LEVEL).unwrap();
+    let value_bytes = pco::standalone::simpler_compress(&values, pco::DEFAULT_COMPRESSION_LEVEL).unwrap();
+    let (length_bytes, value_bytes) = (serde_bytes::Bytes::new(&length_bytes), serde_bytes::Bytes::new(&value_bytes));
+    let mut bytes = Vec::new();
+    ciborium::into_writer(&(length_bytes, value_bytes), &mut bytes).unwrap();
+    println!("serialized to {:.0?} bytes after {:.1?} using {:.0?}KB peak memory", bytes.len(), start.elapsed(), PEAK_ALLOC.peak_usage_as_kb());
+    PEAK_ALLOC.reset_peak_usage();
+    let start = Instant::now();
+    let (length_bytes, value_bytes): (Vec<u8>, Vec<u8>) = ciborium::from_reader(&bytes[..]).unwrap();
+    let lengths = pco::standalone::simple_decompress::<u64>(&length_bytes).unwrap();
+    let values = pco::standalone::simple_decompress::<T>(&value_bytes).unwrap();
+    let mut values = values.into_iter();
+    let mut combined = Vec::with_capacity(lengths.len());
+    for length in lengths {
+        combined.push(values.by_ref().take(length as usize).collect::<Vec<T>>());
+    }
+    black_box(combined);
+    println!("deserialized and retained after {:.1?} using {:.0?}KB peak memory", start.elapsed(), PEAK_ALLOC.peak_usage_as_kb());
 }
 
 fn bench_serde<T>(values: Vec<T>, r#type: &str)
@@ -123,24 +183,46 @@ where
     println!("deserialized and retained after {:.1?} using {:.0?}KB peak memory", start.elapsed(), PEAK_ALLOC.peak_usage_as_kb());
 }
 
-fn bench_facet<T>(values: Vec<T>, r#type: &str)
+fn bench_msgpack<T>(values: Vec<T>, r#type: &str)
 where
-    T: for<'a> facet::Facet<'a>,
+    T: serde::Serialize + serde::de::DeserializeOwned + 'static,
 {
-    println!("== facet_postcard Vec<{type}>");
+    println!("== msgpack Vec<{type}>");
     PEAK_ALLOC.reset_peak_usage();
     let start = Instant::now();
-    let bytes = facet_compress(values).unwrap();
+    let bytes = msgpack_compress(values).unwrap();
     println!("serialized to {:.0?} bytes after {:.1?} using {:.0?}KB peak memory", bytes.len(), start.elapsed(), PEAK_ALLOC.peak_usage_as_kb());
     PEAK_ALLOC.reset_peak_usage();
     let start = Instant::now();
-    for v in facet_decompress::<T>(&bytes) {
+    for v in msgpack_decompress::<T>(&bytes) {
         black_box(v.unwrap());
     }
     println!("deserialized and discarded after {:.1?} using {:.0?}KB peak memory", start.elapsed(), PEAK_ALLOC.peak_usage_as_kb());
     PEAK_ALLOC.reset_peak_usage();
     let start = Instant::now();
-    let result: Vec<T> = facet_decompress::<T>(&bytes).collect::<Result<_>>().unwrap();
+    let result: Vec<T> = msgpack_decompress::<T>(&bytes).collect::<Result<_>>().unwrap();
+    black_box(result);
+    println!("deserialized and retained after {:.1?} using {:.0?}KB peak memory", start.elapsed(), PEAK_ALLOC.peak_usage_as_kb());
+}
+
+fn bench_cbor<T>(values: Vec<T>, r#type: &str)
+where
+    T: serde::Serialize + serde::de::DeserializeOwned + 'static,
+{
+    println!("== cbor Vec<{type}>");
+    PEAK_ALLOC.reset_peak_usage();
+    let start = Instant::now();
+    let bytes = cbor_compress(values).unwrap();
+    println!("serialized to {:.0?} bytes after {:.1?} using {:.0?}KB peak memory", bytes.len(), start.elapsed(), PEAK_ALLOC.peak_usage_as_kb());
+    PEAK_ALLOC.reset_peak_usage();
+    let start = Instant::now();
+    for v in cbor_decompress::<T>(&bytes) {
+        black_box(v.unwrap());
+    }
+    println!("deserialized and discarded after {:.1?} using {:.0?}KB peak memory", start.elapsed(), PEAK_ALLOC.peak_usage_as_kb());
+    PEAK_ALLOC.reset_peak_usage();
+    let start = Instant::now();
+    let result: Vec<T> = cbor_decompress::<T>(&bytes).collect::<Result<_>>().unwrap();
     black_box(result);
     println!("deserialized and retained after {:.1?} using {:.0?}KB peak memory", start.elapsed(), PEAK_ALLOC.peak_usage_as_kb());
 }
@@ -182,17 +264,6 @@ fn serde_values() -> Vec<serde_json::Value> {
     values
 }
 
-fn facet_values() -> Vec<facet_value::Value> {
-    let mut values = Vec::new();
-    for i in 0..100_000u32 {
-        let id = i.pow(2);
-        let (keya, valuea) = (format!("Key A {i}"), format!("Value A {i}"));
-        let (keyb, valueb) = (format!("Key B {id}"), format!("Value B {id}"));
-        values.push(facet_value::value!({ keya: valuea, keyb: valueb }));
-    }
-    values
-}
-
 fn hashmap() -> Vec<HashMap<String, String>> {
     let mut values = Vec::new();
     for i in 0..100_000u32 {
@@ -220,7 +291,7 @@ fn indexmap() -> Vec<IndexMap<String, String>> {
     values
 }
 
-#[derive(serde::Serialize, serde::Deserialize, facet::Facet)]
+#[derive(serde::Serialize, serde::Deserialize)]
 struct Struct {
     a: u32,
     b: u32,
@@ -238,7 +309,6 @@ fn structs() -> Vec<Struct> {
 }
 
 //
-// Below is custom compression + serialization logic for serde and facet_postcard.
 // Since string-like data can be very large, we use a streaming approach so during decompression,
 // each row can be individually hydrated into memory, significantly reducing memory usage
 // when many rows are immediately filtered out.
@@ -272,71 +342,62 @@ where
     Box::new(json_iter.map(|res| res.map_err(anyhow::Error::from)))
 }
 
-fn facet_compress<T, I>(items: I) -> anyhow::Result<Vec<u8>>
+fn msgpack_compress<T>(items: Vec<T>) -> anyhow::Result<Vec<u8>>
 where
-    T: for<'a> facet::Facet<'a>,
-    I: IntoIterator<Item = T>,
+    T: serde::Serialize,
 {
-    use std::io::Write;
     let mut output = Vec::new();
     let mut encoder = zstd::stream::write::Encoder::new(&mut output, 3)?;
     for item in items {
-        let bytes = facet_postcard::to_vec(&item)?;
-        // Encode and write the length prefix
-        let mut len = bytes.len();
-        loop {
-            let byte = (len & 0x7F) as u8;
-            len >>= 7;
-            if len > 0 {
-                // Set continuation bit
-                encoder.write_all(&[byte | 0x80])?;
-            } else {
-                encoder.write_all(&[byte])?;
-                break;
-            }
-        }
-        // Write the actual data
-        encoder.write_all(&bytes)?;
+        // Serialize directly into the zstd encoder
+        rmp_serde::encode::write(&mut encoder, &item)?;
     }
     encoder.finish()?;
     Ok(output)
 }
 
-fn facet_decompress<'a, T>(input: &'a [u8]) -> impl Iterator<Item = anyhow::Result<T>> + 'a
+fn msgpack_decompress<T>(input: &[u8]) -> impl Iterator<Item = anyhow::Result<T>> + '_
 where
-    T: facet::Facet<'static> + 'a,
+    T: for<'de> serde::Deserialize<'de> + 'static,
 {
-    use std::io::Read;
-    let decoder = zstd::stream::read::Decoder::new(input).unwrap();
-    let mut reader = std::io::BufReader::with_capacity(128 * 1024, decoder);
-    let mut buffer = Vec::new();
-    std::iter::from_fn(move || {
-        // Read length prefix
-        let mut len: usize = 0;
-        let mut shift = 0;
-        loop {
-            let mut b = [0u8; 1];
-            if let Err(_) = reader.read_exact(&mut b) {
-                return None; // EOF
-            }
-            let byte = b[0];
-            len |= ((byte & 0x7F) as usize) << shift;
-            if (byte & 0x80) == 0 {
-                break;
-            }
-            shift += 7;
-            if shift > 63 {
-                return Some(Err(anyhow::anyhow!("Varint overflow")));
-            }
-        }
-        // Read the exact number of bytes from the length prefix
-        buffer.resize(len, 0);
-        if let Err(e) = reader.read_exact(&mut buffer) {
-            return Some(Err(e.into()));
-        }
-        match facet_postcard::from_slice::<T>(&buffer) {
-            Ok(item) => Some(Ok(item)),
-            Err(e) => Some(Err(anyhow::anyhow!("Postcard error: {:?}", e))),
-        }
-    })
+    let decoder = match zstd::stream::read::Decoder::new(input) {
+        Ok(d) => d,
+        Err(e) => return Box::new(std::iter::once(Err(e.into()))) as Box<dyn Iterator<Item = _>>,
+    };
+    let buffered = std::io::BufReader::with_capacity(128 * 1024, decoder);
+    let mut de = rmp_serde::decode::Deserializer::new(buffered);
+    Box::new(std::iter::from_fn(move || match serde::Deserialize::deserialize(&mut de) {
+        Ok(item) => Some(Ok(item)),
+        Err(rmp_serde::decode::Error::InvalidMarkerRead(ref e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => None,
+        Err(e) => Some(Err(anyhow::anyhow!(e))),
+    }))
+}
+
+fn cbor_compress<T>(items: Vec<T>) -> anyhow::Result<Vec<u8>>
+where
+    T: serde::Serialize,
+{
+    let mut output = Vec::new();
+    let mut encoder = zstd::stream::write::Encoder::new(&mut output, 3)?;
+    for item in items {
+        ciborium::into_writer(&item, &mut encoder)?;
+    }
+    encoder.finish()?;
+    Ok(output)
+}
+
+fn cbor_decompress<T>(input: &[u8]) -> impl Iterator<Item = anyhow::Result<T>> + '_
+where
+    T: for<'de> serde::Deserialize<'de> + 'static,
+{
+    let decoder = match zstd::stream::read::Decoder::new(input) {
+        Ok(d) => d,
+        Err(e) => return Box::new(std::iter::once(Err(e.into()))) as Box<dyn Iterator<Item = _>>,
+    };
+    let mut buffered = std::io::BufReader::with_capacity(128 * 1024, decoder);
+    Box::new(std::iter::from_fn(move || match ciborium::from_reader::<T, _>(&mut buffered) {
+        Ok(item) => Some(Ok(item)),
+        Err(ciborium::de::Error::Io(ref e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => None,
+        Err(e) => Some(Err(anyhow::anyhow!(e))),
+    }))
 }
