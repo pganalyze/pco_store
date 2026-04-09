@@ -14,6 +14,10 @@ fn main() {
     bench_serde(numbers(), "i64");
     bench_facet(numbers(), "i64");
     println!();
+    bench_flat_pco(numbers_nested(), "Vec<u64> + Vec<i64> (flattened)");
+    bench_serde(numbers_nested(), "Vec<i64>");
+    bench_facet(numbers_nested(), "Vec<i64>");
+    println!();
     bench_serde(strings(), "String");
     bench_facet(strings(), "String");
     println!();
@@ -27,8 +31,6 @@ fn main() {
     bench_facet(btreemap(), "BTreeMap<String, String>");
     println!();
     bench_serde(indexmap(), "IndexMap<String, String>");
-    println!("== facet_postcard Vec<IndexMap<String, String>>");
-    println!("!! skipped because IndexMap doesn't support Facet");
     println!();
     bench_serde(structs(), "Struct");
     bench_facet(structs(), "Struct");
@@ -46,15 +48,57 @@ where
     println!("serialized to {:.0?} bytes after {:.1?} using {:.0?}KB peak memory", bytes.len(), start.elapsed(), PEAK_ALLOC.peak_usage_as_kb());
     PEAK_ALLOC.reset_peak_usage();
     let start = Instant::now();
-    for v in pco::standalone::simple_decompress::<T>(&bytes).unwrap() {
-        black_box(v);
-    }
-    println!("deserialized and discarded after {:.1?} using {:.0?}KB peak memory", start.elapsed(), PEAK_ALLOC.peak_usage_as_kb());
-    PEAK_ALLOC.reset_peak_usage();
-    let start = Instant::now();
     let result: Vec<T> = pco::standalone::simple_decompress(&bytes).unwrap();
     black_box(result);
     println!("deserialized and retained after {:.1?} using {:.0?}KB peak memory", start.elapsed(), PEAK_ALLOC.peak_usage_as_kb());
+}
+
+fn bench_flat_pco<T>(nested_values: Vec<Vec<T>>, r#type: &str)
+where
+    T: pco::data_types::Number,
+{
+    let mut lengths = Vec::new();
+    let mut values = Vec::new();
+    for value in nested_values {
+        lengths.push(value.len() as u64);
+        values.extend(value);
+    }
+    println!("== pco {type}");
+    PEAK_ALLOC.reset_peak_usage();
+    let start = Instant::now();
+    let length_bytes = pco::standalone::simpler_compress(&lengths, pco::DEFAULT_COMPRESSION_LEVEL).unwrap();
+    let value_bytes = pco::standalone::simpler_compress(&values, pco::DEFAULT_COMPRESSION_LEVEL).unwrap();
+    let bytes = encode_nested_vec(length_bytes, value_bytes);
+    println!("serialized to {:.0?} bytes after {:.1?} using {:.0?}KB peak memory", bytes.len(), start.elapsed(), PEAK_ALLOC.peak_usage_as_kb());
+    PEAK_ALLOC.reset_peak_usage();
+    let start = Instant::now();
+    let (length_bytes, value_bytes) = decode_nested_vec(&bytes).unwrap();
+    let lengths = pco::standalone::simple_decompress::<u64>(&length_bytes).unwrap();
+    let values = pco::standalone::simple_decompress::<T>(&value_bytes).unwrap();
+    let mut values = values.into_iter();
+    let mut combined = Vec::with_capacity(lengths.len());
+    for length in lengths {
+        combined.push(values.by_ref().take(length as usize).collect::<Vec<T>>());
+    }
+    black_box(combined);
+    println!("deserialized and retained after {:.1?} using {:.0?}KB peak memory", start.elapsed(), PEAK_ALLOC.peak_usage_as_kb());
+}
+
+fn encode_nested_vec(v1: Vec<u8>, v2: Vec<u8>) -> Vec<u8> {
+    let mut out = Vec::with_capacity(8 + v1.len() + 8 + v2.len());
+    out.extend_from_slice(&(v1.len() as u64).to_le_bytes());
+    out.extend(v1);
+    out.extend_from_slice(&(v2.len() as u64).to_le_bytes());
+    out.extend(v2);
+    out
+}
+
+fn decode_nested_vec(data: &[u8]) -> Result<(&[u8], &[u8]), &'static str> {
+    let len1 = u64::from_le_bytes(data[0..8].try_into().unwrap()) as usize;
+    let vec1 = &data[8..8 + len1];
+    let len2 = u64::from_le_bytes(data[8 + len1..16 + len1].try_into().unwrap()) as usize;
+    let vec2 = &data[16 + len1..16 + len1 + len2];
+    Ok((vec1, vec2))
 }
 
 fn bench_serde<T>(values: Vec<T>, r#type: &str)
@@ -114,6 +158,14 @@ fn numbers() -> Vec<u64> {
     let mut values = Vec::new();
     for i in 0..100_000u64 {
         values.extend([i, i * 2, i.pow(2)]);
+    }
+    values
+}
+
+fn numbers_nested() -> Vec<Vec<u64>> {
+    let mut values = Vec::new();
+    for i in 0..100_000u64 {
+        values.push(vec![i, i * 2, i.pow(2)]);
     }
     values
 }

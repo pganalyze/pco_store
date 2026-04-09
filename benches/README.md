@@ -55,6 +55,7 @@ Now with the optimized data model, this benchmark compares the performance of us
 This compares various serialization formats for several data types. Findings:
 
 - for numeric data, pco has >3x better compressed size and >5x faster deserialization, but serialization uses 2x more memory
+- for nested numeric data like `Vec<Vec<i64>>`, pco can achieve similar compression ratios by flattening the data and storing the length of each nested array in order to rebuild the nested structure later
 - serde deserialization is >5x faster than facet_postcard, and the other metrics are similar enough to not matter
 - maps are best stored as `BTreeMap` or `IndexMap` because `HashMap`'s random hasher hurts compression
 
