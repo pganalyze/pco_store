@@ -254,46 +254,46 @@ impl CompressedQueryStats {
                         &rows[0].database_id,
                         &start_at,
                         &end_at,
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &collected_at,
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &::pco::ChunkConfig::default(),
                             )
                             .unwrap(),
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                             &rows.iter().map(|r| r.collected_secs).collect::<Vec<_>>(),
-                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                            &::pco::ChunkConfig::default(),
                         )?,
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                             &rows.iter().map(|r| r.fingerprint).collect::<Vec<_>>(),
-                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                            &::pco::ChunkConfig::default(),
                         )?,
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                             &rows.iter().map(|r| r.postgres_role_id).collect::<Vec<_>>(),
-                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                            &::pco::ChunkConfig::default(),
                         )?,
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                             &rows.iter().map(|r| r.calls).collect::<Vec<_>>(),
-                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                            &::pco::ChunkConfig::default(),
                         )?,
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                             &rows.iter().map(|r| r.rows).collect::<Vec<_>>(),
-                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                            &::pco::ChunkConfig::default(),
                         )?,
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                             &rows.iter().map(|r| r.total_time).collect::<Vec<_>>(),
-                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                            &::pco::ChunkConfig::default(),
                         )?,
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                             &rows.iter().map(|r| r.io_time).collect::<Vec<_>>(),
-                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                            &::pco::ChunkConfig::default(),
                         )?,
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                             &rows.iter().map(|r| r.shared_blks_hit).collect::<Vec<_>>(),
-                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                            &::pco::ChunkConfig::default(),
                         )?,
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                             &rows.iter().map(|r| r.shared_blks_read).collect::<Vec<_>>(),
-                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                            &::pco::ChunkConfig::default(),
                         )?,
                     ],
                 )
@@ -368,46 +368,46 @@ impl CompressedQueryStats {
                         &rows[0].database_id,
                         &start_at,
                         &end_at,
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &collected_at,
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &::pco::ChunkConfig::default(),
                             )
                             .unwrap(),
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                             &rows.iter().map(|r| r.collected_secs).collect::<Vec<_>>(),
-                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                            &::pco::ChunkConfig::default(),
                         )?,
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                             &rows.iter().map(|r| r.fingerprint).collect::<Vec<_>>(),
-                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                            &::pco::ChunkConfig::default(),
                         )?,
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                             &rows.iter().map(|r| r.postgres_role_id).collect::<Vec<_>>(),
-                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                            &::pco::ChunkConfig::default(),
                         )?,
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                             &rows.iter().map(|r| r.calls).collect::<Vec<_>>(),
-                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                            &::pco::ChunkConfig::default(),
                         )?,
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                             &rows.iter().map(|r| r.rows).collect::<Vec<_>>(),
-                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                            &::pco::ChunkConfig::default(),
                         )?,
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                             &rows.iter().map(|r| r.total_time).collect::<Vec<_>>(),
-                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                            &::pco::ChunkConfig::default(),
                         )?,
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                             &rows.iter().map(|r| r.io_time).collect::<Vec<_>>(),
-                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                            &::pco::ChunkConfig::default(),
                         )?,
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                             &rows.iter().map(|r| r.shared_blks_hit).collect::<Vec<_>>(),
-                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                            &::pco::ChunkConfig::default(),
                         )?,
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                             &rows.iter().map(|r| r.shared_blks_read).collect::<Vec<_>>(),
-                            ::pco::DEFAULT_COMPRESSION_LEVEL,
+                            &::pco::ChunkConfig::default(),
                         )?,
                     ],
                 )
@@ -2306,13 +2306,13 @@ where
         lengths.push(vals.len() as u64);
         values.extend(vals);
     }
-    let length_bytes = ::pco::standalone::simpler_compress(
+    let length_bytes = ::pco::standalone::simple_compress(
         &lengths,
-        ::pco::DEFAULT_COMPRESSION_LEVEL,
+        &::pco::ChunkConfig::default(),
     )?;
-    let value_bytes = ::pco::standalone::simpler_compress(
+    let value_bytes = ::pco::standalone::simple_compress(
         &values,
-        ::pco::DEFAULT_COMPRESSION_LEVEL,
+        &::pco::ChunkConfig::default(),
     )?;
     let (length_bytes, value_bytes) = (
         serde_bytes::Bytes::new(&length_bytes),

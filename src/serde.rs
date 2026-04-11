@@ -41,8 +41,8 @@ pub fn generate() -> proc_macro2::TokenStream {
                 lengths.push(vals.len() as u64);
                 values.extend(vals);
             }
-            let length_bytes = ::pco::standalone::simpler_compress(&lengths, ::pco::DEFAULT_COMPRESSION_LEVEL)?;
-            let value_bytes = ::pco::standalone::simpler_compress(&values, ::pco::DEFAULT_COMPRESSION_LEVEL)?;
+            let length_bytes = ::pco::standalone::simple_compress(&lengths, &::pco::ChunkConfig::default())?;
+            let value_bytes = ::pco::standalone::simple_compress(&values, &::pco::ChunkConfig::default())?;
             let (length_bytes, value_bytes) = (serde_bytes::Bytes::new(&length_bytes), serde_bytes::Bytes::new(&value_bytes));
             Ok(rmp_serde::to_vec(&(length_bytes, value_bytes))?)
         }

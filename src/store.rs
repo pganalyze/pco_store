@@ -37,7 +37,7 @@ pub fn generate(
             store_types.push(Ident::new("BYTEA", Span::call_site()));
             store_values.push(quote! {
                 &start_at, &end_at,
-                &::pco::standalone::simpler_compress(&#timestamp, ::pco::DEFAULT_COMPRESSION_LEVEL).unwrap(),
+                &::pco::standalone::simple_compress(&#timestamp, &::pco::ChunkConfig::default()).unwrap(),
             });
         } else if is_number(&ty) || is_nested_number(&ty) {
             store_fields.push(ident.to_string());
@@ -56,8 +56,8 @@ pub fn generate(
             };
             if is_number(&ty) {
                 store_values.push(quote! {
-                    &::pco::standalone::simpler_compress(
-                        &rows.iter().map(|r| #expr).collect::<Vec<_>>(), ::pco::DEFAULT_COMPRESSION_LEVEL
+                    &::pco::standalone::simple_compress(
+                        &rows.iter().map(|r| #expr).collect::<Vec<_>>(), &::pco::ChunkConfig::default()
                     )?,
                 });
             } else {
