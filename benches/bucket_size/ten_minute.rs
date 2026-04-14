@@ -63,16 +63,16 @@ pub async fn store() -> Result<()> {
             #[rustfmt::skip]
             let values: &[&(dyn ToSql + Sync)] = &[
                 &database_id, &start_at, &end_at,
-                &pco::standalone::simpler_compress(&collected_at, pco::DEFAULT_COMPRESSION_LEVEL).unwrap(),
-                &pco::standalone::simpler_compress(&collected_secs, pco::DEFAULT_COMPRESSION_LEVEL).unwrap(),
-                &pco::standalone::simpler_compress(&fingerprint, pco::DEFAULT_COMPRESSION_LEVEL).unwrap(),
-                &pco::standalone::simpler_compress(&postgres_role_id, pco::DEFAULT_COMPRESSION_LEVEL).unwrap(),
-                &pco::standalone::simpler_compress(&calls, pco::DEFAULT_COMPRESSION_LEVEL).unwrap(),
-                &pco::standalone::simpler_compress(&rows, pco::DEFAULT_COMPRESSION_LEVEL).unwrap(),
-                &pco::standalone::simpler_compress(&total_time, pco::DEFAULT_COMPRESSION_LEVEL).unwrap(),
-                &pco::standalone::simpler_compress(&io_time, pco::DEFAULT_COMPRESSION_LEVEL).unwrap(),
-                &pco::standalone::simpler_compress(&shared_blks_hit, pco::DEFAULT_COMPRESSION_LEVEL).unwrap(),
-                &pco::standalone::simpler_compress(&shared_blks_read, pco::DEFAULT_COMPRESSION_LEVEL).unwrap(),
+                &pco::standalone::simple_compress(&collected_at, &pco::ChunkConfig::default()).unwrap(),
+                &pco::standalone::simple_compress(&collected_secs, &pco::ChunkConfig::default()).unwrap(),
+                &pco::standalone::simple_compress(&fingerprint, &pco::ChunkConfig::default()).unwrap(),
+                &pco::standalone::simple_compress(&postgres_role_id, &pco::ChunkConfig::default()).unwrap(),
+                &pco::standalone::simple_compress(&calls, &pco::ChunkConfig::default()).unwrap(),
+                &pco::standalone::simple_compress(&rows, &pco::ChunkConfig::default()).unwrap(),
+                &pco::standalone::simple_compress(&total_time, &pco::ChunkConfig::default()).unwrap(),
+                &pco::standalone::simple_compress(&io_time, &pco::ChunkConfig::default()).unwrap(),
+                &pco::standalone::simple_compress(&shared_blks_hit, &pco::ChunkConfig::default()).unwrap(),
+                &pco::standalone::simple_compress(&shared_blks_read, &pco::ChunkConfig::default()).unwrap(),
             ];
             writer.as_mut().write(values).await?;
         }

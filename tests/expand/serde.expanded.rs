@@ -842,9 +842,9 @@ impl CompressedSerdes {
                         &rows[0].name,
                         &start_at,
                         &end_at,
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &time,
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &::pco::ChunkConfig::default(),
                             )
                             .unwrap(),
                         &serde_compress(
@@ -938,9 +938,9 @@ impl CompressedSerdes {
                         &rows[0].name,
                         &start_at,
                         &end_at,
-                        &::pco::standalone::simpler_compress(
+                        &::pco::standalone::simple_compress(
                                 &time,
-                                ::pco::DEFAULT_COMPRESSION_LEVEL,
+                                &::pco::ChunkConfig::default(),
                             )
                             .unwrap(),
                         &serde_compress(
@@ -2586,13 +2586,13 @@ where
         lengths.push(vals.len() as u64);
         values.extend(vals);
     }
-    let length_bytes = ::pco::standalone::simpler_compress(
+    let length_bytes = ::pco::standalone::simple_compress(
         &lengths,
-        ::pco::DEFAULT_COMPRESSION_LEVEL,
+        &::pco::ChunkConfig::default(),
     )?;
-    let value_bytes = ::pco::standalone::simpler_compress(
+    let value_bytes = ::pco::standalone::simple_compress(
         &values,
-        ::pco::DEFAULT_COMPRESSION_LEVEL,
+        &::pco::ChunkConfig::default(),
     )?;
     let (length_bytes, value_bytes) = (
         serde_bytes::Bytes::new(&length_bytes),
