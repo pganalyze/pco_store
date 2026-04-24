@@ -97,6 +97,19 @@ pub fn generate(
     let store_sql = format!("COPY {table_name} ({store_fields}) FROM STDIN BINARY");
 
     quote! {
+        pub fn new(rows: &Vec<#name>) -> anyhow::Result<Self> {
+            let #timestamp: Vec<_> = rows.iter().map(|s| s.#timestamp).collect();
+            let start_at = *#timestamp.iter().min().unwrap();
+            let end_at = *#timestamp.iter().max().unwrap();
+            let #timestamp: Vec<u64> = #timestamp.into_iter().map(|t| #map_inner).collect();
+
+            Ok(Self {
+                start_at,
+                end_at,
+                #timestamp: #timestamp.into(),
+            })
+        }
+
         /// Writes the data to disk.
         pub async fn store(db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>, rows: Vec<#name>) -> anyhow::Result<()> {
             if rows.is_empty() {
@@ -112,6 +125,7 @@ pub fn generate(
             let writer = tokio_postgres::binary_copy::BinaryCopyInWriter::new(stmt, types);
             futures::pin_mut!(writer);
             for rows in grouped_rows.into_values() {
+                //let row = Self::new(rows)?;
                 #timestamp_collect
                 writer.as_mut().write(&[#store_values]).await?;
             }
