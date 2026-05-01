@@ -35,10 +35,11 @@ pub fn generate(
             store_types.push(Ident::new("TIMESTAMPTZ", Span::call_site()));
             store_types.push(Ident::new("TIMESTAMPTZ", Span::call_site()));
             store_types.push(Ident::new("BYTEA", Span::call_site()));
-            store_values.push(quote! {
+            /*store_values.push(quote! {
                 &start_at, &end_at,
                 &::pco::standalone::simple_compress(&#timestamp, &::pco::ChunkConfig::default()).unwrap(),
-            });
+            });*/
+            store_values.push(quote! { &row.start_at, &row.end_at, &row.#timestamp, });
         } else if is_number(&ty) || is_nested_number(&ty) {
             store_fields.push(ident.to_string());
             store_types.push(Ident::new("BYTEA", Span::call_site()));
@@ -113,6 +114,7 @@ pub fn generate(
             futures::pin_mut!(writer);
             for rows in grouped_rows.into_values() {
                 #timestamp_collect
+                let row = Self::new(&rows)?;
                 writer.as_mut().write(&[#store_values]).await?;
             }
             writer.finish().await?;
@@ -146,6 +148,7 @@ pub fn generate(
             futures::pin_mut!(writer);
             for rows in grouped_rows.into_values() {
                 #timestamp_collect
+                let row = Self::new(&rows)?;
                 writer.as_mut().write(&[#store_values]).await?;
             }
             writer.finish().await?;
