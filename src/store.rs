@@ -12,6 +12,7 @@ pub fn generate(
     let mut store_types = Vec::new();
     let mut store_group = Vec::new();
     let mut store_values = Vec::new();
+    let mut new_values = Vec::new();
     for field in model.fields.iter() {
         let ident = field.ident.clone().unwrap();
         let ty_original = field.ty.clone();
@@ -35,10 +36,11 @@ pub fn generate(
             store_types.push(Ident::new("TIMESTAMPTZ", Span::call_site()));
             store_types.push(Ident::new("TIMESTAMPTZ", Span::call_site()));
             store_types.push(Ident::new("BYTEA", Span::call_site()));
-            store_values.push(quote! {
-                &start_at, &end_at,
-                &::pco::standalone::simple_compress(&#timestamp, &::pco::ChunkConfig::default()).unwrap(),
+            new_values.push(quote! {
+                start_at, end_at,
+                #timestamp: ::pco::standalone::simple_compress(&#timestamp, &::pco::ChunkConfig::default()).unwrap(),
             });
+            store_values.push(quote! { &row.start_at, &row.end_at, &row.#timestamp, });
         } else if is_number(&ty) || is_nested_number(&ty) {
             store_fields.push(ident.to_string());
             store_types.push(Ident::new("BYTEA", Span::call_site()));
@@ -79,6 +81,7 @@ pub fn generate(
     let store_types = tokens(store_types.into_iter().map(|t| quote! { tokio_postgres::types::Type::#t, }).collect());
     let store_group = tokens(store_group);
     let store_values = tokens(store_values);
+    let new_values = tokens(new_values);
     let map_inner = if using_chrono {
         quote! { t.timestamp_micros() as u64 }
     } else {
@@ -94,20 +97,17 @@ pub fn generate(
     } else {
         quote! {}
     };
+
     let store_sql = format!("COPY {table_name} ({store_fields}) FROM STDIN BINARY");
 
     quote! {
         pub fn new(rows: &Vec<#name>) -> anyhow::Result<Self> {
-            let #timestamp: Vec<_> = rows.iter().map(|s| s.#timestamp).collect();
-            let start_at = *#timestamp.iter().min().unwrap();
-            let end_at = *#timestamp.iter().max().unwrap();
-            let #timestamp: Vec<u64> = #timestamp.into_iter().map(|t| #map_inner).collect();
+            #timestamp_collect
 
-            Ok(Self {
-                start_at,
-                end_at,
-                #timestamp: #timestamp.into(),
-            })
+            Self {
+                #store_values
+                #new_values
+            }
         }
 
         /// Writes the data to disk.
