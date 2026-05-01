@@ -101,11 +101,10 @@ pub fn generate(
     let store_sql = format!("COPY {table_name} ({store_fields}) FROM STDIN BINARY");
 
     quote! {
-        pub fn new(rows: &Vec<#name>) -> anyhow::Result<Self> {
+        pub fn new(rows: &Vec<#name>) -> Self {
             #timestamp_collect
 
             Self {
-                #store_values
                 #new_values
             }
         }
@@ -125,8 +124,7 @@ pub fn generate(
             let writer = tokio_postgres::binary_copy::BinaryCopyInWriter::new(stmt, types);
             futures::pin_mut!(writer);
             for rows in grouped_rows.into_values() {
-                //let row = Self::new(rows)?;
-                #timestamp_collect
+                let row = Self::new(&rows);
                 writer.as_mut().write(&[#store_values]).await?;
             }
             writer.finish().await?;
