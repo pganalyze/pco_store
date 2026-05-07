@@ -21,7 +21,8 @@ pub fn generate(
             ty = Type::Verbatim(quote! { u16 });
         }
         if group_by.iter().any(|i| *i == ident) {
-            values.push(quote! { #ident: rows[0].#ident, });
+            // FIXME(duckinator): is there a better way to handle this than _always_ cloning it? (This fixes a problem where the value is a String.)
+            values.push(quote! { #ident: rows[0].#ident.clone(), });
         } else if timestamp.as_ref().map(|t| *t == ident).unwrap_or(false) {
             values.push(quote! {
                 start_at, end_at,
@@ -48,14 +49,14 @@ pub fn generate(
                 });
             } else {
                 values.push(quote! {
-                    #ident: &pco_compress_nested(
+                    #ident: pco_compress_nested(
                         rows.iter().map(|r| r.#ident.iter().map(|v| *#expr).collect::<Vec<_>>()).collect::<Vec<_>>()
                     )?,
                 });
             }
         } else {
             values.push(quote! {
-                #ident: &serde_compress(rows.iter().map(|r| r.#ident.clone()).collect::<Vec<_>>())?,
+                #ident: serde_compress(rows.iter().map(|r| r.#ident.clone()).collect::<Vec<_>>())?,
             });
         }
 
