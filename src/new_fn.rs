@@ -21,11 +21,11 @@ pub fn generate(
             ty = Type::Verbatim(quote! { u16 });
         }
         if group_by.iter().any(|i| *i == ident) {
-            values.push(quote! { #ident: &rows[0].#ident, });
+            values.push(quote! { #ident: rows[0].#ident, });
         } else if timestamp.as_ref().map(|t| *t == ident).unwrap_or(false) {
             values.push(quote! {
                 start_at, end_at,
-                #timestamp: &::pco::standalone::simple_compress(&#timestamp, &::pco::ChunkConfig::default()).unwrap(),
+                #timestamp: ::pco::standalone::simple_compress(&#timestamp, &::pco::ChunkConfig::default()).unwrap(),
             });
         } else if is_number(&ty) || is_nested_number(&ty) {
             let val = if is_number(&ty) {
@@ -42,7 +42,7 @@ pub fn generate(
             };
             if is_number(&ty) {
                 values.push(quote! {
-                    #ident: &::pco::standalone::simple_compress(
+                    #ident: ::pco::standalone::simple_compress(
                         &rows.iter().map(|r| #expr).collect::<Vec<_>>(), &::pco::ChunkConfig::default()
                     )?,
                 });
