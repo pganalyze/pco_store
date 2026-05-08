@@ -17,7 +17,29 @@ pub fn generate(model: ItemStruct, args: Arguments, packed_name: Ident) -> proc_
         let name = format!("{ident}");
         let is_timestamp = timestamp.as_ref().map(|t| *t == ident).unwrap_or(false);
         fields.push(quote! { #ident: bool, });
-        if group_by.iter().any(|i| *i == ident) || is_timestamp {
+        if is_timestamp {
+            fields.push(quote! { start_at: bool, end_at: bool, });
+            default.push(quote! { start_at: true, end_at: true, });
+            select.push(quote! { fields.extend(["start_at", "end_at"]); });
+            load.push(quote! {
+                start_at: {
+                    let v = row.get(index);
+                    index += 1;
+                    v
+                },
+                end_at: {
+                    let v = row.get(index);
+                    index += 1;
+                    v
+                },
+            });
+            required.push(quote! {
+                #timestamp: true,
+                start_at: true,
+                end_at: true,
+            });
+            merge_filter.push(quote! { self.#ident = true; });
+        } else if group_by.iter().any(|i| *i == ident) {
             required.push(quote! { #ident: true, });
         } else {
             required.push(quote! { #ident: false, });

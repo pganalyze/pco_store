@@ -25,8 +25,8 @@ pub fn generate(
             values.push(quote! { #ident: rows[0].#ident.clone(), });
         } else if timestamp.as_ref().map(|t| *t == ident).unwrap_or(false) {
             values.push(quote! {
-                start_at, end_at,
                 #timestamp: ::pco::standalone::simple_compress(&#timestamp, &::pco::ChunkConfig::default()).unwrap(),
+                start_at, end_at,
             });
         } else if is_number(&ty) || is_nested_number(&ty) {
             let val = if is_number(&ty) {
