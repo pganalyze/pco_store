@@ -4,7 +4,7 @@ use quote::quote;
 use syn::{Ident, ItemStruct, Type};
 
 pub fn generate(
-    model: &ItemStruct, timestamp: &Option<Ident>, group_by: &Vec<Ident>, float_round: Option<f32>, table_name: &str, using_chrono: bool,
+    model: &ItemStruct, timestamp: &Option<Ident>, group_by: &Vec<Ident>, float_round: Option<f32>, using_chrono: bool,
 ) -> proc_macro2::TokenStream {
     let name = model.ident.clone();
 
