@@ -886,30 +886,12 @@ impl CompressedSerdes {
                         &row.start_at,
                         &row.end_at,
                         &row.time,
-                        &serde_compress(
-                            rows
-                                .iter()
-                                .map(|r| r.description.clone())
-                                .collect::<Vec<_>>(),
-                        )?,
-                        &serde_compress(
-                            rows.iter().map(|r| r.tags.clone()).collect::<Vec<_>>(),
-                        )?,
-                        &pco_compress_nested(
-                            rows
-                                .iter()
-                                .map(|r| r.nums.iter().map(|v| *v).collect::<Vec<_>>())
-                                .collect::<Vec<_>>(),
-                        )?,
-                        &serde_compress(
-                            rows.iter().map(|r| r.map.clone()).collect::<Vec<_>>(),
-                        )?,
-                        &serde_compress(
-                            rows.iter().map(|r| r.json.clone()).collect::<Vec<_>>(),
-                        )?,
-                        &serde_compress(
-                            rows.iter().map(|r| r.model.clone()).collect::<Vec<_>>(),
-                        )?,
+                        &row.description,
+                        &row.tags,
+                        &row.nums,
+                        &row.map,
+                        &row.json,
+                        &row.model,
                     ],
                 )
                 .await?;
@@ -979,30 +961,12 @@ impl CompressedSerdes {
                         &row.start_at,
                         &row.end_at,
                         &row.time,
-                        &serde_compress(
-                            rows
-                                .iter()
-                                .map(|r| r.description.clone())
-                                .collect::<Vec<_>>(),
-                        )?,
-                        &serde_compress(
-                            rows.iter().map(|r| r.tags.clone()).collect::<Vec<_>>(),
-                        )?,
-                        &pco_compress_nested(
-                            rows
-                                .iter()
-                                .map(|r| r.nums.iter().map(|v| *v).collect::<Vec<_>>())
-                                .collect::<Vec<_>>(),
-                        )?,
-                        &serde_compress(
-                            rows.iter().map(|r| r.map.clone()).collect::<Vec<_>>(),
-                        )?,
-                        &serde_compress(
-                            rows.iter().map(|r| r.json.clone()).collect::<Vec<_>>(),
-                        )?,
-                        &serde_compress(
-                            rows.iter().map(|r| r.model.clone()).collect::<Vec<_>>(),
-                        )?,
+                        &row.description,
+                        &row.tags,
+                        &row.nums,
+                        &row.map,
+                        &row.json,
+                        &row.model,
                     ],
                 )
                 .await?;

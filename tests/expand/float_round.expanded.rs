@@ -135,22 +135,7 @@ impl CompressedQueryStats {
             let row = Self::new(&rows)?;
             writer
                 .as_mut()
-                .write(
-                    &[
-                        &rows[0].database_id,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.calls).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows
-                                .iter()
-                                .map(|r| (r.total_time * 100f32 as f64).round() as i64)
-                                .collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                    ],
-                )
+                .write(&[&rows[0].database_id, &row.calls, &row.total_time])
                 .await?;
         }
         writer.finish().await?;
@@ -196,22 +181,7 @@ impl CompressedQueryStats {
             let row = Self::new(&rows)?;
             writer
                 .as_mut()
-                .write(
-                    &[
-                        &rows[0].database_id,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.calls).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows
-                                .iter()
-                                .map(|r| (r.total_time * 100f32 as f64).round() as i64)
-                                .collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                    ],
-                )
+                .write(&[&rows[0].database_id, &row.calls, &row.total_time])
                 .await?;
         }
         writer.finish().await?;

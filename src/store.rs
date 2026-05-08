@@ -35,45 +35,15 @@ pub fn generate(
             store_types.push(Ident::new("TIMESTAMPTZ", Span::call_site()));
             store_types.push(Ident::new("TIMESTAMPTZ", Span::call_site()));
             store_types.push(Ident::new("BYTEA", Span::call_site()));
-            /*store_values.push(quote! {
-                &start_at, &end_at,
-                &::pco::standalone::simple_compress(&#timestamp, &::pco::ChunkConfig::default()).unwrap(),
-            });*/
             store_values.push(quote! { &row.start_at, &row.end_at, &row.#timestamp, });
         } else if is_number(&ty) || is_nested_number(&ty) {
             store_fields.push(ident.to_string());
             store_types.push(Ident::new("BYTEA", Span::call_site()));
-            let val = if is_number(&ty) {
-                quote! { r.#ident }
-            } else {
-                quote! { v } // Closure argument inside of nested `map`
-            };
-            let expr = if round_float_field {
-                quote! { (#val * #float_round as #ty_original).round() as i64 }
-            } else if quote! { #ty_original }.to_string() == "bool" {
-                quote! { #val as u16 }
-            } else {
-                quote! { #val }
-            };
-            if is_number(&ty) {
-                store_values.push(quote! {
-                    &::pco::standalone::simple_compress(
-                        &rows.iter().map(|r| #expr).collect::<Vec<_>>(), &::pco::ChunkConfig::default()
-                    )?,
-                });
-            } else {
-                store_values.push(quote! {
-                    &pco_compress_nested(
-                        rows.iter().map(|r| r.#ident.iter().map(|v| *#expr).collect::<Vec<_>>()).collect::<Vec<_>>()
-                    )?,
-                });
-            }
+            store_values.push(quote! { &row.#ident, });
         } else {
             store_fields.push(ident.to_string());
             store_types.push(Ident::new("BYTEA", Span::call_site()));
-            store_values.push(quote! {
-                &serde_compress(rows.iter().map(|r| r.#ident.clone()).collect::<Vec<_>>())?,
-            });
+            store_values.push(quote! { &row.#ident, });
         }
     }
     let store_fields = store_fields.join(", ");

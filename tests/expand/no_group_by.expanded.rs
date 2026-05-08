@@ -130,22 +130,7 @@ impl CompressedQueryStats {
             let row = Self::new(&rows)?;
             writer
                 .as_mut()
-                .write(
-                    &[
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.database_id).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.calls).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.total_time).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                    ],
-                )
+                .write(&[&row.database_id, &row.calls, &row.total_time])
                 .await?;
         }
         writer.finish().await?;
@@ -188,22 +173,7 @@ impl CompressedQueryStats {
             let row = Self::new(&rows)?;
             writer
                 .as_mut()
-                .write(
-                    &[
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.database_id).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.calls).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.total_time).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                    ],
-                )
+                .write(&[&row.database_id, &row.calls, &row.total_time])
                 .await?;
         }
         writer.finish().await?;

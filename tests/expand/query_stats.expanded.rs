@@ -317,42 +317,15 @@ impl CompressedQueryStats {
                         &row.start_at,
                         &row.end_at,
                         &row.collected_at,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.collected_secs).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.fingerprint).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.postgres_role_id).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.calls).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.rows).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.total_time).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.io_time).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.shared_blks_hit).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.shared_blks_read).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
+                        &row.collected_secs,
+                        &row.fingerprint,
+                        &row.postgres_role_id,
+                        &row.calls,
+                        &row.rows,
+                        &row.total_time,
+                        &row.io_time,
+                        &row.shared_blks_hit,
+                        &row.shared_blks_read,
                     ],
                 )
                 .await?;
@@ -428,42 +401,15 @@ impl CompressedQueryStats {
                         &row.start_at,
                         &row.end_at,
                         &row.collected_at,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.collected_secs).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.fingerprint).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.postgres_role_id).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.calls).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.rows).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.total_time).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.io_time).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.shared_blks_hit).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.shared_blks_read).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
+                        &row.collected_secs,
+                        &row.fingerprint,
+                        &row.postgres_role_id,
+                        &row.calls,
+                        &row.rows,
+                        &row.total_time,
+                        &row.io_time,
+                        &row.shared_blks_hit,
+                        &row.shared_blks_read,
                     ],
                 )
                 .await?;
