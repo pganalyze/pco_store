@@ -86,7 +86,7 @@ pub fn generate(
 
             Ok(Self {
                 #values
-                filter: None, // FIXME: I'm like 99% sure this is wrong.
+                filter: None, // Since we're compressing data to store, no filter is needed.
             })
         }
     }
