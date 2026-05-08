@@ -1,5 +1,4 @@
 use super::*;
-use proc_macro2::Span;
 use quote::quote;
 use syn::{Ident, ItemStruct, Type};
 
