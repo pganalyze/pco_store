@@ -58,7 +58,6 @@ pub fn generate(
                 #ident: serde_compress(rows.iter().map(|r| r.#ident.clone()).collect::<Vec<_>>())?,
             });
         }
-
     }
     let values = tokens(values);
 
@@ -67,7 +66,6 @@ pub fn generate(
     } else {
         quote! { t.duration_since(std::time::SystemTime::UNIX_EPOCH).unwrap().as_micros() as u64 }
     };
-
 
     let timestamp_collect = if timestamp.is_some() {
         quote! {

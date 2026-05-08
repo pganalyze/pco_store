@@ -99,7 +99,6 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
     }
     let packed_fields = tokens(packed_fields);
 
-
     let start_end_fields = if timestamp.is_some() {
         quote! {
             start_at: #timestamp_ty,
