@@ -21,7 +21,6 @@ pub fn generate(
             ty = Type::Verbatim(quote! { u16 });
         }
         if group_by.iter().any(|i| *i == ident) {
-            // FIXME(duckinator): is there a better way to handle this than _always_ cloning it? (This fixes a problem where the value is a String.)
             values.push(quote! { #ident: rows[0].#ident.clone(), });
         } else if timestamp.as_ref().map(|t| *t == ident).unwrap_or(false) {
             values.push(quote! {
