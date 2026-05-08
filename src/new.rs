@@ -60,13 +60,13 @@ pub fn generate(
     }
     let values = tokens(values);
 
-    let map_inner = if using_chrono {
-        quote! { t.timestamp_micros() as u64 }
-    } else {
-        quote! { t.duration_since(std::time::SystemTime::UNIX_EPOCH).unwrap().as_micros() as u64 }
-    };
-
     let timestamp_collect = if timestamp.is_some() {
+        let map_inner = if using_chrono {
+            quote! { t.timestamp_micros() as u64 }
+        } else {
+            quote! { t.duration_since(std::time::SystemTime::UNIX_EPOCH).unwrap().as_micros() as u64 }
+        };
+
         quote! {
             let #timestamp: Vec<_> = rows.iter().map(|s| s.#timestamp).collect();
             let start_at = *#timestamp.iter().min().unwrap();
@@ -76,7 +76,6 @@ pub fn generate(
     } else {
         quote! {}
     };
-
     quote! {
         pub fn new(rows: &Vec<#name>) -> anyhow::Result<Self> {
             #timestamp_collect
