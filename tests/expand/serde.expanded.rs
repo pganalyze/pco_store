@@ -869,13 +869,6 @@ impl CompressedSerdes {
             ::pin_utils::core_reexport::pin::Pin::new_unchecked(&mut writer)
         };
         for rows in grouped_rows.into_values() {
-            let time: Vec<_> = rows.iter().map(|s| s.time).collect();
-            let start_at = *time.iter().min().unwrap();
-            let end_at = *time.iter().max().unwrap();
-            let time: Vec<u64> = time
-                .into_iter()
-                .map(|t| t.timestamp_micros() as u64)
-                .collect();
             let row = Self::new(&rows)?;
             writer
                 .as_mut()
@@ -944,13 +937,6 @@ impl CompressedSerdes {
             ::pin_utils::core_reexport::pin::Pin::new_unchecked(&mut writer)
         };
         for rows in grouped_rows.into_values() {
-            let time: Vec<_> = rows.iter().map(|s| s.time).collect();
-            let start_at = *time.iter().min().unwrap();
-            let end_at = *time.iter().max().unwrap();
-            let time: Vec<u64> = time
-                .into_iter()
-                .map(|t| t.timestamp_micros() as u64)
-                .collect();
             let row = Self::new(&rows)?;
             writer
                 .as_mut()

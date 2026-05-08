@@ -296,18 +296,6 @@ impl CompressedQueryStats {
             ::pin_utils::core_reexport::pin::Pin::new_unchecked(&mut writer)
         };
         for rows in grouped_rows.into_values() {
-            let collected_at: Vec<_> = rows.iter().map(|s| s.collected_at).collect();
-            let start_at = *collected_at.iter().min().unwrap();
-            let end_at = *collected_at.iter().max().unwrap();
-            let collected_at: Vec<u64> = collected_at
-                .into_iter()
-                .map(|t| {
-                    t
-                        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                        .unwrap()
-                        .as_micros() as u64
-                })
-                .collect();
             let row = Self::new(&rows)?;
             writer
                 .as_mut()
@@ -380,18 +368,6 @@ impl CompressedQueryStats {
             ::pin_utils::core_reexport::pin::Pin::new_unchecked(&mut writer)
         };
         for rows in grouped_rows.into_values() {
-            let collected_at: Vec<_> = rows.iter().map(|s| s.collected_at).collect();
-            let start_at = *collected_at.iter().min().unwrap();
-            let end_at = *collected_at.iter().max().unwrap();
-            let collected_at: Vec<u64> = collected_at
-                .into_iter()
-                .map(|t| {
-                    t
-                        .duration_since(std::time::SystemTime::UNIX_EPOCH)
-                        .unwrap()
-                        .as_micros() as u64
-                })
-                .collect();
             let row = Self::new(&rows)?;
             writer
                 .as_mut()
