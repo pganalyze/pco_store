@@ -691,23 +691,25 @@ impl CompressedSerdes {
                 .unwrap(),
             start_at,
             end_at,
-            description: serde_compress(
+            description: pco_store::serde_compress(
                 rows.iter().map(|r| r.description.clone()).collect::<Vec<_>>(),
             )?,
-            tags: serde_compress(
+            tags: pco_store::serde_compress(
                 rows.iter().map(|r| r.tags.clone()).collect::<Vec<_>>(),
             )?,
-            nums: pco_compress_nested(
+            nums: pco_store::nested_compress(
                 rows
                     .iter()
                     .map(|r| r.nums.iter().map(|v| *v).collect::<Vec<_>>())
                     .collect::<Vec<_>>(),
             )?,
-            map: serde_compress(rows.iter().map(|r| r.map.clone()).collect::<Vec<_>>())?,
-            json: serde_compress(
+            map: pco_store::serde_compress(
+                rows.iter().map(|r| r.map.clone()).collect::<Vec<_>>(),
+            )?,
+            json: pco_store::serde_compress(
                 rows.iter().map(|r| r.json.clone()).collect::<Vec<_>>(),
             )?,
-            model: serde_compress(
+            model: pco_store::serde_compress(
                 rows.iter().map(|r| r.model.clone()).collect::<Vec<_>>(),
             )?,
             filter: None,
@@ -803,13 +805,15 @@ impl CompressedSerdes {
         } else {
             ::pco::standalone::simple_decompress(&self.time)?
         };
-        let mut description = serde_decompress::<String>(&self.description);
-        let mut tags = serde_decompress::<Vec<String>>(&self.tags);
-        let mut nums: std::vec::IntoIter<Vec<i32>> = pco_decompress_nested(self.nums)?
+        let mut description = pco_store::serde_decompress::<String>(&self.description);
+        let mut tags = pco_store::serde_decompress::<Vec<String>>(&self.tags);
+        let mut nums: std::vec::IntoIter<Vec<i32>> = pco_store::nested_decompress(
+                self.nums,
+            )?
             .into_iter();
-        let mut map = serde_decompress::<BTreeMap<String, String>>(&self.map);
-        let mut json = serde_decompress::<serde_json::Value>(&self.json);
-        let mut model = serde_decompress::<Option<Box<Serde>>>(&self.model);
+        let mut map = pco_store::serde_decompress::<BTreeMap<String, String>>(&self.map);
+        let mut json = pco_store::serde_decompress::<serde_json::Value>(&self.json);
+        let mut model = pco_store::serde_decompress::<Option<Box<Serde>>>(&self.model);
         let len = [time.len()].into_iter().max().unwrap_or(0);
         for index in 0..len {
             let row = Serde {
@@ -976,7 +980,7 @@ pub struct Filter {
         deserialize_with = ":: serde_with :: As :: < serde_with :: DefaultOnNull < serde_with :: OneOrMany\n< :: serde_with :: Same > > > :: deserialize"
     )]
     pub name: Vec<String>,
-    #[serde(deserialize_with = "deserialize_time_range")]
+    #[serde(deserialize_with = "pco_store::deserialize_chrono_time_range")]
     pub time: Option<std::ops::RangeInclusive<DateTime<Utc>>>,
     #[serde(default)]
     #[serde_as(deserialize_as = "serde_with::DefaultOnNull<serde_with::OneOrMany<_>>")]
@@ -1317,7 +1321,9 @@ const _: () = {
                                 __D: _serde::Deserializer<'de>,
                             {
                                 _serde::__private228::Ok(__DeserializeWith {
-                                    value: deserialize_time_range(__deserializer)?,
+                                    value: pco_store::deserialize_chrono_time_range(
+                                        __deserializer,
+                                    )?,
                                     phantom: _serde::__private228::PhantomData,
                                     lifetime: _serde::__private228::PhantomData,
                                 })
@@ -1718,7 +1724,9 @@ const _: () = {
                                             __D: _serde::Deserializer<'de>,
                                         {
                                             _serde::__private228::Ok(__DeserializeWith {
-                                                value: deserialize_time_range(__deserializer)?,
+                                                value: pco_store::deserialize_chrono_time_range(
+                                                    __deserializer,
+                                                )?,
                                                 phantom: _serde::__private228::PhantomData,
                                                 lifetime: _serde::__private228::PhantomData,
                                             })
@@ -2464,162 +2472,4 @@ impl<'de> serde::de::Visitor<'de> for FieldsVisitor {
     {
         Ok(Fields::default())
     }
-}
-/// Deserializes many different time range formats:
-/// - an array with two strings becomes a normal time range: ["a", "b"] -> a..=b
-/// - an array with one string becomes a single-value time range: ["a"] -> a..=a
-/// - a string literal becomes a single-value time range:           "a" -> a..=a
-fn deserialize_time_range<'de, D>(
-    deserializer: D,
-) -> Result<Option<std::ops::RangeInclusive<DateTime<Utc>>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    Ok(TimeRange::deserialize(deserializer)?.0)
-}
-struct TimeRange(Option<std::ops::RangeInclusive<DateTime<Utc>>>);
-#[automatically_derived]
-impl ::core::fmt::Debug for TimeRange {
-    #[inline]
-    fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
-        ::core::fmt::Formatter::debug_tuple_field1_finish(f, "TimeRange", &&self.0)
-    }
-}
-#[automatically_derived]
-impl ::core::marker::StructuralPartialEq for TimeRange {}
-#[automatically_derived]
-impl ::core::cmp::PartialEq for TimeRange {
-    #[inline]
-    fn eq(&self, other: &TimeRange) -> bool {
-        self.0 == other.0
-    }
-}
-impl<'de> serde::Deserialize<'de> for TimeRange {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserializer.deserialize_any(TimeRangeVisitor)
-    }
-}
-struct TimeRangeVisitor;
-impl<'de> serde::de::Visitor<'de> for TimeRangeVisitor {
-    type Value = TimeRange;
-    fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-        formatter.write_str("a single time string or an array with 1-2 time strings")
-    }
-    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-    where
-        E: serde::de::Error,
-    {
-        if value.is_empty() {
-            return Ok(TimeRange(None));
-        }
-        match serde::Deserialize::deserialize(
-            serde::de::value::StrDeserializer::<E>::new(value),
-        ) {
-            Ok(start) => Ok(TimeRange(Some(start..=start))),
-            Err(err) => {
-                Err(
-                    E::custom(
-                        "invalid time format: ".to_string() + err.to_string().as_str(),
-                    ),
-                )
-            }
-        }
-    }
-    fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-    where
-        A: serde::de::SeqAccess<'de>,
-    {
-        let start = match seq.next_element::<Option<DateTime<Utc>>>()? {
-            Some(Some(time)) => time,
-            Some(None) | None => return Ok(TimeRange(None)),
-        };
-        let end = match seq.next_element::<Option<DateTime<Utc>>>()? {
-            Some(Some(time)) => time,
-            Some(None) | None => start,
-        };
-        Ok(TimeRange(Some(start..=end)))
-    }
-    fn visit_unit<E>(self) -> Result<Self::Value, E>
-    where
-        E: serde::de::Error,
-    {
-        Ok(TimeRange(None))
-    }
-}
-fn serde_compress<T>(items: Vec<T>) -> anyhow::Result<Vec<u8>>
-where
-    T: serde::Serialize,
-{
-    use std::io::Write;
-    let mut output = Vec::new();
-    let mut encoder = zstd::stream::write::Encoder::new(&mut output, 3)?;
-    for item in items {
-        rmp_serde::encode::write(&mut encoder, &item)?;
-    }
-    encoder.finish()?;
-    Ok(output)
-}
-fn serde_decompress<T>(input: &[u8]) -> impl Iterator<Item = anyhow::Result<T>> + '_
-where
-    T: for<'de> serde::Deserialize<'de> + 'static,
-{
-    let decoder = match zstd::stream::read::Decoder::new(input) {
-        Ok(d) => d,
-        Err(e) => {
-            return Box::new(std::iter::once(Err(e.into())))
-                as Box<dyn Iterator<Item = _>>;
-        }
-    };
-    let buffered = std::io::BufReader::with_capacity(128 * 1024, decoder);
-    let mut de = rmp_serde::decode::Deserializer::new(buffered);
-    Box::new(
-        std::iter::from_fn(move || match serde::Deserialize::deserialize(&mut de) {
-            Ok(item) => Some(Ok(item)),
-            Err(
-                rmp_serde::decode::Error::InvalidMarkerRead(ref e),
-            ) if e.kind() == std::io::ErrorKind::UnexpectedEof => None,
-            Err(e) => Some(Err(e.into())),
-        }),
-    )
-}
-fn pco_compress_nested<T>(nested_values: Vec<Vec<T>>) -> anyhow::Result<Vec<u8>>
-where
-    T: ::pco::data_types::Number,
-{
-    let mut lengths = Vec::new();
-    let mut values = Vec::new();
-    for vals in nested_values {
-        lengths.push(vals.len() as u64);
-        values.extend(vals);
-    }
-    let length_bytes = ::pco::standalone::simple_compress(
-        &lengths,
-        &::pco::ChunkConfig::default(),
-    )?;
-    let value_bytes = ::pco::standalone::simple_compress(
-        &values,
-        &::pco::ChunkConfig::default(),
-    )?;
-    let (length_bytes, value_bytes) = (
-        serde_bytes::Bytes::new(&length_bytes),
-        serde_bytes::Bytes::new(&value_bytes),
-    );
-    Ok(rmp_serde::to_vec(&(length_bytes, value_bytes))?)
-}
-fn pco_decompress_nested<T>(bytes: Vec<u8>) -> anyhow::Result<Vec<Vec<T>>>
-where
-    T: ::pco::data_types::Number,
-{
-    let (length_bytes, value_bytes): (Vec<u8>, Vec<u8>) = rmp_serde::from_slice(&bytes)?;
-    let lengths = ::pco::standalone::simple_decompress::<u64>(&length_bytes)?;
-    let values = ::pco::standalone::simple_decompress::<T>(&value_bytes)?;
-    let mut values = values.into_iter();
-    let mut nested_values = Vec::with_capacity(lengths.len());
-    for length in lengths {
-        nested_values.push(values.by_ref().take(length as usize).collect::<Vec<T>>());
-    }
-    Ok(nested_values)
 }

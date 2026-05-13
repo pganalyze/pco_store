@@ -47,14 +47,14 @@ pub fn generate(
                 });
             } else {
                 values.push(quote! {
-                    #ident: pco_compress_nested(
+                    #ident: pco_store::nested_compress(
                         rows.iter().map(|r| r.#ident.iter().map(|v| *#expr).collect::<Vec<_>>()).collect::<Vec<_>>()
                     )?,
                 });
             }
         } else {
             values.push(quote! {
-                #ident: serde_compress(rows.iter().map(|r| r.#ident.clone()).collect::<Vec<_>>())?,
+                #ident: pco_store::serde_compress(rows.iter().map(|r| r.#ident.clone()).collect::<Vec<_>>())?,
             });
         }
     }

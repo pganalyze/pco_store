@@ -1,174 +1,65 @@
-use proc_macro::TokenStream;
-use proc_macro2::Span;
-use quote::{ToTokens, quote};
-use syn::parse::{Parse, ParseStream};
-use syn::{Ident, ItemStruct, Lit, Result, Token, Type, bracketed, parse_macro_input};
-
-mod decompress;
 mod deserialize_time_range;
-mod fields;
-mod filter;
-mod load;
-mod new;
-mod serde;
-mod store;
 
-#[derive(Clone)]
-struct Arguments {
-    timestamp: Option<Ident>,
-    group_by: Vec<Ident>,
-    float_round: Option<f32>,
-    table_name: Option<Ident>,
-}
-impl Parse for Arguments {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let mut timestamp = None;
-        let mut group_by = Vec::new();
-        let mut float_round = None;
-        let mut table_name = None;
-        while !input.is_empty() {
-            let ident: Ident = input.parse()?;
-            let _: Token![=] = input.parse()?;
-            match ident.to_string().as_str() {
-                "timestamp" => timestamp = Some(input.parse()?),
-                "group_by" => {
-                    let content;
-                    bracketed!(content in input);
-                    group_by = content.parse_terminated(Ident::parse, Token![,])?.into_iter().collect();
-                }
-                "float_round" => {
-                    if let Lit::Int(value) = Lit::parse(input)? {
-                        let value = value.base10_parse()?;
-                        assert!(value > 0, "float_round must be greater than zero");
-                        float_round = Some(10i32.pow(value) as f32);
-                    } else {
-                        panic!("unsupported float_round value");
-                    }
-                }
-                "table_name" => table_name = Some(input.parse()?),
-                _ => {
-                    input.error("unexpected ident");
-                }
-            }
-            let _: Option<Token![,]> = input.parse().ok();
-        }
-        Ok(Self { timestamp, group_by, float_round, table_name })
+pub use deserialize_time_range::*;
+pub use pco_store_macros::store;
+
+pub fn serde_compress<T>(items: Vec<T>) -> anyhow::Result<Vec<u8>>
+where
+    T: serde::Serialize,
+{
+    let mut output = Vec::new();
+    let mut encoder = zstd::stream::write::Encoder::new(&mut output, 3)?;
+    for item in items {
+        rmp_serde::encode::write(&mut encoder, &item)?;
     }
+    encoder.finish()?;
+    Ok(output)
 }
 
-#[proc_macro_attribute]
-pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
-    let a = args.clone();
-    let i = item.clone();
-    let args = parse_macro_input!(a as Arguments);
-    let Arguments { timestamp, group_by, float_round, table_name } = args.clone();
-    let model = parse_macro_input!(i as ItemStruct);
-    let item = proc_macro2::TokenStream::from(item);
-    let name = model.ident.clone();
-    let packed_name = Ident::new(&format!("Compressed{}s", model.ident), Span::call_site());
-
-    let table_name = if let Some(table_name) = table_name {
-        table_name.to_string()
-    } else {
-        let mut table_name = String::new();
-        for c in model.ident.to_string().chars() {
-            if c.is_uppercase() && table_name.len() > 0 {
-                table_name += "_";
-            }
-            table_name += &c.to_lowercase().to_string();
-        }
-        table_name += "s";
-        table_name
+pub fn serde_decompress<T>(input: &[u8]) -> impl Iterator<Item = anyhow::Result<T>> + '_
+where
+    T: for<'de> serde::Deserialize<'de> + 'static,
+{
+    let decoder = match zstd::stream::read::Decoder::new(input) {
+        Ok(d) => d,
+        Err(e) => return Box::new(std::iter::once(Err(e.into()))) as Box<dyn Iterator<Item = _>>,
     };
-
-    let mut packed_fields = vec![quote! { filter: Option<Filter>, }];
-    let mut timestamp_ty = None;
-    let mut using_chrono = false;
-    for field in model.fields.iter() {
-        let ident = field.ident.clone().unwrap();
-        let ty = field.ty.clone();
-        if group_by.iter().any(|i| *i == ident) {
-            packed_fields.push(quote! { #ident: #ty, });
-        } else if timestamp.as_ref().map(|t| *t == ident).unwrap_or(false) {
-            using_chrono = !ty.to_token_stream().to_string().contains("SystemTime");
-            timestamp_ty = Some(ty.clone());
-            packed_fields.push(quote! { #ident: Vec<u8>, });
-        } else {
-            packed_fields.push(quote! { #ident: Vec<u8>, });
-        }
-    }
-    if timestamp.is_some() {
-        packed_fields.push(quote! {
-            start_at: #timestamp_ty,
-            end_at: #timestamp_ty,
-        });
-    }
-    let packed_fields = tokens(packed_fields);
-
-    let filter = filter::generate(model.clone(), args.clone(), using_chrono, &timestamp_ty);
-    let fields = fields::generate(model.clone(), args.clone(), packed_name.clone());
-    let deserialize_time_range = timestamp_ty.map(|t| deserialize_time_range::generate(&t));
-
-    let load_and_delete = load::generate(&model, &timestamp, &group_by, &packed_name, &table_name);
-    let decompress = decompress::generate(&model, &timestamp, &group_by, float_round, &table_name, using_chrono);
-    let store_and_store_grouped = store::generate(&model, &timestamp, &group_by, float_round, &table_name);
-    let new = new::generate(&model, &timestamp, &group_by, float_round, using_chrono);
-    let serde = serde::generate();
-
-    quote! {
-        use serde::Deserialize as _;
-
-        #item
-
-        #[doc=concat!(" Generated by pco_store to store and load compressed versions of [", stringify!(#name), "]")]
-        pub struct #packed_name {
-            #packed_fields
-        }
-
-        impl #packed_name {
-            #new
-
-            #load_and_delete
-
-            #decompress
-
-            #store_and_store_grouped
-        }
-
-        #filter
-        #fields
-        #deserialize_time_range
-        #serde
-    }
-    .into()
+    let buffered = std::io::BufReader::with_capacity(128 * 1024, decoder);
+    let mut de = rmp_serde::decode::Deserializer::new(buffered);
+    Box::new(std::iter::from_fn(move || match serde::Deserialize::deserialize(&mut de) {
+        Ok(item) => Some(Ok(item)),
+        Err(rmp_serde::decode::Error::InvalidMarkerRead(ref e)) if e.kind() == std::io::ErrorKind::UnexpectedEof => None,
+        Err(e) => Some(Err(e.into())),
+    }))
 }
 
-fn is_number(ty: &Type) -> bool {
-    let ty = quote! { #ty }.to_string();
-    match ty.as_str() {
-        "u8" | "u16" | "u32" | "u64" => true,
-        "i8" | "i16" | "i32" | "i64" => true,
-        "f32" | "f64" => true,
-        "bool" => true,
-        _ => false,
+pub fn nested_compress<T>(nested_values: Vec<Vec<T>>) -> anyhow::Result<Vec<u8>>
+where
+    T: ::pco::data_types::Number,
+{
+    let mut lengths = Vec::new();
+    let mut values = Vec::new();
+    for vals in nested_values {
+        lengths.push(vals.len() as u64);
+        values.extend(vals);
     }
+    let length_bytes = ::pco::standalone::simple_compress(&lengths, &::pco::ChunkConfig::default())?;
+    let value_bytes = ::pco::standalone::simple_compress(&values, &::pco::ChunkConfig::default())?;
+    let (length_bytes, value_bytes) = (serde_bytes::Bytes::new(&length_bytes), serde_bytes::Bytes::new(&value_bytes));
+    Ok(rmp_serde::to_vec(&(length_bytes, value_bytes))?)
 }
 
-fn is_nested_number(ty: &Type) -> bool {
-    let ty = quote! { #ty }.to_string();
-    // Remove syn's added spacing, turning "Vec < i32 >" into "Vec<i32>"
-    let ty = ty.replace(" < ", "<").replace(" >", ">");
-    match ty.as_str() {
-        "Vec<u8>" | "Vec<u16>" | "Vec<u32>" | "Vec<u64>" => true,
-        "Vec<i8>" | "Vec<i16>" | "Vec<i32>" | "Vec<i64>" => true,
-        "Vec<f32>" | "Vec<f64>" => true,
-        "Vec<bool>" => true,
-        _ => false,
+pub fn nested_decompress<T>(bytes: Vec<u8>) -> anyhow::Result<Vec<Vec<T>>>
+where
+    T: ::pco::data_types::Number,
+{
+    let (length_bytes, value_bytes): (Vec<u8>, Vec<u8>) = rmp_serde::from_slice(&bytes)?;
+    let lengths = ::pco::standalone::simple_decompress::<u64>(&length_bytes)?;
+    let values = ::pco::standalone::simple_decompress::<T>(&value_bytes)?;
+    let mut values = values.into_iter();
+    let mut nested_values = Vec::with_capacity(lengths.len());
+    for length in lengths {
+        nested_values.push(values.by_ref().take(length as usize).collect::<Vec<T>>());
     }
-}
-
-fn tokens(input: Vec<proc_macro2::TokenStream>) -> proc_macro2::TokenStream {
-    let mut tokens = proc_macro2::TokenStream::new();
-    tokens.extend(input.into_iter());
-    tokens
+    Ok(nested_values)
 }

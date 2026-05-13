@@ -14,8 +14,9 @@ pub fn generate(model: ItemStruct, args: Arguments, using_chrono: bool, timestam
         let ty = field.ty.clone();
         let time = ty.to_token_stream().to_string().contains("Time");
         if time {
+            let deserialize_with = if using_chrono { "pco_store::deserialize_chrono_time_range" } else { "pco_store::deserialize_time_range" };
             filter_fields.push(quote! {
-                #[serde(deserialize_with = "deserialize_time_range")]
+                #[serde(deserialize_with = #deserialize_with)]
                 pub #ident: Option<std::ops::RangeInclusive<#ty>>,
             });
             filter_conditions.push(quote! {

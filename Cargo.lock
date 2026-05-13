@@ -770,6 +770,7 @@ dependencies = [
  "futures",
  "macrotest",
  "pco",
+ "pco_store_macros",
  "peak_alloc",
  "proc-macro2",
  "quote",
@@ -784,6 +785,15 @@ dependencies = [
  "tokio-postgres",
  "uuid",
  "zstd",
+]
+
+[[package]]
+name = "pco_store_macros"
+version = "0.2.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]
