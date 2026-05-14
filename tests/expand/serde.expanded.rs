@@ -2183,9 +2183,9 @@ impl Filter {
 pub struct Fields {
     id: bool,
     name: bool,
-    time: bool,
     start_at: bool,
     end_at: bool,
+    time: bool,
     description: bool,
     tags: bool,
     nums: bool,
@@ -2213,9 +2213,9 @@ impl ::core::fmt::Debug for Fields {
         let names: &'static _ = &[
             "id",
             "name",
-            "time",
             "start_at",
             "end_at",
+            "time",
             "description",
             "tags",
             "nums",
@@ -2226,9 +2226,9 @@ impl ::core::fmt::Debug for Fields {
         let values: &[&dyn ::core::fmt::Debug] = &[
             &self.id,
             &self.name,
-            &self.time,
             &self.start_at,
             &self.end_at,
+            &self.time,
             &self.description,
             &self.tags,
             &self.nums,
@@ -2245,8 +2245,8 @@ impl ::core::marker::StructuralPartialEq for Fields {}
 impl ::core::cmp::PartialEq for Fields {
     #[inline]
     fn eq(&self, other: &Fields) -> bool {
-        self.id == other.id && self.name == other.name && self.time == other.time
-            && self.start_at == other.start_at && self.end_at == other.end_at
+        self.id == other.id && self.name == other.name && self.start_at == other.start_at
+            && self.end_at == other.end_at && self.time == other.time
             && self.description == other.description && self.tags == other.tags
             && self.nums == other.nums && self.map == other.map
             && self.json == other.json && self.model == other.model
@@ -2260,9 +2260,9 @@ impl Fields {
         Self {
             id: true,
             name: true,
-            time: true,
             start_at: true,
             end_at: true,
+            time: true,
             description: false,
             tags: false,
             nums: false,
@@ -2272,7 +2272,6 @@ impl Fields {
         }
     }
     fn merge_filter(&mut self, filter: &Filter) {
-        self.time = true;
         (!filter.description.is_empty()).then(|| self.description = true);
         (!filter.tags.is_empty()).then(|| self.tags = true);
         (!filter.nums.is_empty()).then(|| self.nums = true);
@@ -2284,8 +2283,7 @@ impl Fields {
         let mut fields = Vec::new();
         self.id.then(|| fields.push("id"));
         self.name.then(|| fields.push("name"));
-        fields.extend(["start_at", "end_at"]);
-        self.time.then(|| fields.push("time"));
+        fields.extend(["start_at", "end_at", "time"]);
         self.description.then(|| fields.push("description"));
         self.tags.then(|| fields.push("tags"));
         self.nums.then(|| fields.push("nums"));
@@ -2326,12 +2324,10 @@ impl Fields {
                 index += 1;
                 v
             },
-            time: if self.time {
+            time: {
                 let v = row.get(index);
                 index += 1;
                 v
-            } else {
-                Default::default()
             },
             description: if self.description {
                 let v = row.get(index);
@@ -2403,7 +2399,6 @@ impl TryFrom<&[&str]> for Fields {
             match *s {
                 "id" => fields.id = true,
                 "name" => fields.name = true,
-                "time" => fields.time = true,
                 "description" => fields.description = true,
                 "tags" => fields.tags = true,
                 "nums" => fields.nums = true,
