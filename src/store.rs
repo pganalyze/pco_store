@@ -4,7 +4,7 @@ use quote::quote;
 use syn::{Ident, ItemStruct, Type};
 
 pub fn generate(
-    model: &ItemStruct, timestamp: &Option<Ident>, group_by: &Vec<Ident>, float_round: Option<f32>, table_name: &str, using_chrono: bool,
+    model: &ItemStruct, timestamp: &Option<Ident>, group_by: &Vec<Ident>, float_round: Option<f32>, table_name: &str,
 ) -> proc_macro2::TokenStream {
     let name = model.ident.clone();
 
@@ -35,65 +35,21 @@ pub fn generate(
             store_types.push(Ident::new("TIMESTAMPTZ", Span::call_site()));
             store_types.push(Ident::new("TIMESTAMPTZ", Span::call_site()));
             store_types.push(Ident::new("BYTEA", Span::call_site()));
-            store_values.push(quote! {
-                &start_at, &end_at,
-                &::pco::standalone::simple_compress(&#timestamp, &::pco::ChunkConfig::default()).unwrap(),
-            });
+            store_values.push(quote! { &row.start_at, &row.end_at, &row.#timestamp, });
         } else if is_number(&ty) || is_nested_number(&ty) {
             store_fields.push(ident.to_string());
             store_types.push(Ident::new("BYTEA", Span::call_site()));
-            let val = if is_number(&ty) {
-                quote! { r.#ident }
-            } else {
-                quote! { v } // Closure argument inside of nested `map`
-            };
-            let expr = if round_float_field {
-                quote! { (#val * #float_round as #ty_original).round() as i64 }
-            } else if quote! { #ty_original }.to_string() == "bool" {
-                quote! { #val as u16 }
-            } else {
-                quote! { #val }
-            };
-            if is_number(&ty) {
-                store_values.push(quote! {
-                    &::pco::standalone::simple_compress(
-                        &rows.iter().map(|r| #expr).collect::<Vec<_>>(), &::pco::ChunkConfig::default()
-                    )?,
-                });
-            } else {
-                store_values.push(quote! {
-                    &pco_compress_nested(
-                        rows.iter().map(|r| r.#ident.iter().map(|v| *#expr).collect::<Vec<_>>()).collect::<Vec<_>>()
-                    )?,
-                });
-            }
+            store_values.push(quote! { &row.#ident, });
         } else {
             store_fields.push(ident.to_string());
             store_types.push(Ident::new("BYTEA", Span::call_site()));
-            store_values.push(quote! {
-                &serde_compress(rows.iter().map(|r| r.#ident.clone()).collect::<Vec<_>>())?,
-            });
+            store_values.push(quote! { &row.#ident, });
         }
     }
     let store_fields = store_fields.join(", ");
     let store_types = tokens(store_types.into_iter().map(|t| quote! { tokio_postgres::types::Type::#t, }).collect());
     let store_group = tokens(store_group);
     let store_values = tokens(store_values);
-    let map_inner = if using_chrono {
-        quote! { t.timestamp_micros() as u64 }
-    } else {
-        quote! { t.duration_since(std::time::SystemTime::UNIX_EPOCH).unwrap().as_micros() as u64 }
-    };
-    let timestamp_collect = if timestamp.is_some() {
-        quote! {
-            let #timestamp: Vec<_> = rows.iter().map(|s| s.#timestamp).collect();
-            let start_at = *#timestamp.iter().min().unwrap();
-            let end_at = *#timestamp.iter().max().unwrap();
-            let #timestamp: Vec<u64> = #timestamp.into_iter().map(|t| #map_inner).collect();
-        }
-    } else {
-        quote! {}
-    };
     let store_sql = format!("COPY {table_name} ({store_fields}) FROM STDIN BINARY");
 
     quote! {
@@ -112,7 +68,7 @@ pub fn generate(
             let writer = tokio_postgres::binary_copy::BinaryCopyInWriter::new(stmt, types);
             futures::pin_mut!(writer);
             for rows in grouped_rows.into_values() {
-                #timestamp_collect
+                let row = Self::new(&rows)?;
                 writer.as_mut().write(&[#store_values]).await?;
             }
             writer.finish().await?;
@@ -145,7 +101,7 @@ pub fn generate(
             let writer = tokio_postgres::binary_copy::BinaryCopyInWriter::new(stmt, types);
             futures::pin_mut!(writer);
             for rows in grouped_rows.into_values() {
-                #timestamp_collect
+                let row = Self::new(&rows)?;
                 writer.as_mut().write(&[#store_values]).await?;
             }
             writer.finish().await?;

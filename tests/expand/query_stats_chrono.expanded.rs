@@ -26,8 +26,66 @@ pub struct CompressedQueryStats {
     io_time: Vec<u8>,
     shared_blks_hit: Vec<u8>,
     shared_blks_read: Vec<u8>,
+    start_at: chrono::DateTime,
+    end_at: chrono::DateTime,
 }
 impl CompressedQueryStats {
+    pub fn new(rows: &Vec<QueryStat>) -> anyhow::Result<Self> {
+        let collected_at: Vec<_> = rows.iter().map(|s| s.collected_at).collect();
+        let start_at = *collected_at.iter().min().unwrap();
+        let end_at = *collected_at.iter().max().unwrap();
+        let collected_at: Vec<u64> = collected_at
+            .into_iter()
+            .map(|t| t.timestamp_micros() as u64)
+            .collect();
+        Ok(Self {
+            database_id: rows[0].database_id.clone(),
+            collected_at: ::pco::standalone::simple_compress(
+                    &collected_at,
+                    &::pco::ChunkConfig::default(),
+                )
+                .unwrap(),
+            start_at,
+            end_at,
+            collected_secs: ::pco::standalone::simple_compress(
+                &rows.iter().map(|r| r.collected_secs).collect::<Vec<_>>(),
+                &::pco::ChunkConfig::default(),
+            )?,
+            fingerprint: ::pco::standalone::simple_compress(
+                &rows.iter().map(|r| r.fingerprint).collect::<Vec<_>>(),
+                &::pco::ChunkConfig::default(),
+            )?,
+            postgres_role_id: ::pco::standalone::simple_compress(
+                &rows.iter().map(|r| r.postgres_role_id).collect::<Vec<_>>(),
+                &::pco::ChunkConfig::default(),
+            )?,
+            calls: ::pco::standalone::simple_compress(
+                &rows.iter().map(|r| r.calls).collect::<Vec<_>>(),
+                &::pco::ChunkConfig::default(),
+            )?,
+            rows: ::pco::standalone::simple_compress(
+                &rows.iter().map(|r| r.rows).collect::<Vec<_>>(),
+                &::pco::ChunkConfig::default(),
+            )?,
+            total_time: ::pco::standalone::simple_compress(
+                &rows.iter().map(|r| r.total_time).collect::<Vec<_>>(),
+                &::pco::ChunkConfig::default(),
+            )?,
+            io_time: ::pco::standalone::simple_compress(
+                &rows.iter().map(|r| r.io_time).collect::<Vec<_>>(),
+                &::pco::ChunkConfig::default(),
+            )?,
+            shared_blks_hit: ::pco::standalone::simple_compress(
+                &rows.iter().map(|r| r.shared_blks_hit).collect::<Vec<_>>(),
+                &::pco::ChunkConfig::default(),
+            )?,
+            shared_blks_read: ::pco::standalone::simple_compress(
+                &rows.iter().map(|r| r.shared_blks_read).collect::<Vec<_>>(),
+                &::pco::ChunkConfig::default(),
+            )?,
+            filter: None,
+        })
+    }
     /// Loads data for the specified filters.
     pub async fn load(
         db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
@@ -235,61 +293,24 @@ impl CompressedQueryStats {
             ::pin_utils::core_reexport::pin::Pin::new_unchecked(&mut writer)
         };
         for rows in grouped_rows.into_values() {
-            let collected_at: Vec<_> = rows.iter().map(|s| s.collected_at).collect();
-            let start_at = *collected_at.iter().min().unwrap();
-            let end_at = *collected_at.iter().max().unwrap();
-            let collected_at: Vec<u64> = collected_at
-                .into_iter()
-                .map(|t| t.timestamp_micros() as u64)
-                .collect();
+            let row = Self::new(&rows)?;
             writer
                 .as_mut()
                 .write(
                     &[
                         &rows[0].database_id,
-                        &start_at,
-                        &end_at,
-                        &::pco::standalone::simple_compress(
-                                &collected_at,
-                                &::pco::ChunkConfig::default(),
-                            )
-                            .unwrap(),
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.collected_secs).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.fingerprint).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.postgres_role_id).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.calls).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.rows).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.total_time).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.io_time).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.shared_blks_hit).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.shared_blks_read).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
+                        &row.start_at,
+                        &row.end_at,
+                        &row.collected_at,
+                        &row.collected_secs,
+                        &row.fingerprint,
+                        &row.postgres_role_id,
+                        &row.calls,
+                        &row.rows,
+                        &row.total_time,
+                        &row.io_time,
+                        &row.shared_blks_hit,
+                        &row.shared_blks_read,
                     ],
                 )
                 .await?;
@@ -344,61 +365,24 @@ impl CompressedQueryStats {
             ::pin_utils::core_reexport::pin::Pin::new_unchecked(&mut writer)
         };
         for rows in grouped_rows.into_values() {
-            let collected_at: Vec<_> = rows.iter().map(|s| s.collected_at).collect();
-            let start_at = *collected_at.iter().min().unwrap();
-            let end_at = *collected_at.iter().max().unwrap();
-            let collected_at: Vec<u64> = collected_at
-                .into_iter()
-                .map(|t| t.timestamp_micros() as u64)
-                .collect();
+            let row = Self::new(&rows)?;
             writer
                 .as_mut()
                 .write(
                     &[
                         &rows[0].database_id,
-                        &start_at,
-                        &end_at,
-                        &::pco::standalone::simple_compress(
-                                &collected_at,
-                                &::pco::ChunkConfig::default(),
-                            )
-                            .unwrap(),
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.collected_secs).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.fingerprint).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.postgres_role_id).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.calls).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.rows).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.total_time).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.io_time).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.shared_blks_hit).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.shared_blks_read).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
+                        &row.start_at,
+                        &row.end_at,
+                        &row.collected_at,
+                        &row.collected_secs,
+                        &row.fingerprint,
+                        &row.postgres_role_id,
+                        &row.calls,
+                        &row.rows,
+                        &row.total_time,
+                        &row.io_time,
+                        &row.shared_blks_hit,
+                        &row.shared_blks_read,
                     ],
                 )
                 .await?;
@@ -1867,6 +1851,8 @@ impl Filter {
 /// Generated by pco_store to choose which fields to decompress when loading [QueryStat]
 pub struct Fields {
     database_id: bool,
+    start_at: bool,
+    end_at: bool,
     collected_at: bool,
     collected_secs: bool,
     fingerprint: bool,
@@ -1897,6 +1883,8 @@ impl ::core::fmt::Debug for Fields {
     fn fmt(&self, f: &mut ::core::fmt::Formatter) -> ::core::fmt::Result {
         let names: &'static _ = &[
             "database_id",
+            "start_at",
+            "end_at",
             "collected_at",
             "collected_secs",
             "fingerprint",
@@ -1910,6 +1898,8 @@ impl ::core::fmt::Debug for Fields {
         ];
         let values: &[&dyn ::core::fmt::Debug] = &[
             &self.database_id,
+            &self.start_at,
+            &self.end_at,
             &self.collected_at,
             &self.collected_secs,
             &self.fingerprint,
@@ -1930,7 +1920,8 @@ impl ::core::marker::StructuralPartialEq for Fields {}
 impl ::core::cmp::PartialEq for Fields {
     #[inline]
     fn eq(&self, other: &Fields) -> bool {
-        self.database_id == other.database_id && self.collected_at == other.collected_at
+        self.database_id == other.database_id && self.start_at == other.start_at
+            && self.end_at == other.end_at && self.collected_at == other.collected_at
             && self.collected_secs == other.collected_secs
             && self.fingerprint == other.fingerprint
             && self.postgres_role_id == other.postgres_role_id
@@ -1947,6 +1938,8 @@ impl Fields {
     pub fn required() -> Self {
         Self {
             database_id: true,
+            start_at: true,
+            end_at: true,
             collected_at: true,
             collected_secs: false,
             fingerprint: false,
@@ -1973,7 +1966,7 @@ impl Fields {
     fn select(&self) -> String {
         let mut fields = Vec::new();
         self.database_id.then(|| fields.push("database_id"));
-        self.collected_at.then(|| fields.push("collected_at"));
+        fields.extend(["start_at", "end_at", "collected_at"]);
         self.collected_secs.then(|| fields.push("collected_secs"));
         self.fingerprint.then(|| fields.push("fingerprint"));
         self.postgres_role_id.then(|| fields.push("postgres_role_id"));
@@ -2000,12 +1993,20 @@ impl Fields {
             } else {
                 Default::default()
             },
-            collected_at: if self.collected_at {
+            start_at: {
                 let v = row.get(index);
                 index += 1;
                 v
-            } else {
-                Default::default()
+            },
+            end_at: {
+                let v = row.get(index);
+                index += 1;
+                v
+            },
+            collected_at: {
+                let v = row.get(index);
+                index += 1;
+                v
             },
             collected_secs: if self.collected_secs {
                 let v = row.get(index);
@@ -2077,6 +2078,8 @@ impl Default for Fields {
     fn default() -> Self {
         Self {
             database_id: true,
+            start_at: true,
+            end_at: true,
             collected_at: true,
             collected_secs: true,
             fingerprint: true,
@@ -2097,7 +2100,6 @@ impl TryFrom<&[&str]> for Fields {
         for s in input {
             match *s {
                 "database_id" => fields.database_id = true,
-                "collected_at" => fields.collected_at = true,
                 "collected_secs" => fields.collected_secs = true,
                 "fingerprint" => fields.fingerprint = true,
                 "postgres_role_id" => fields.postgres_role_id = true,

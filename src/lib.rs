@@ -9,6 +9,7 @@ mod deserialize_time_range;
 mod fields;
 mod filter;
 mod load;
+mod new;
 mod serde;
 mod store;
 
@@ -96,6 +97,12 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
             packed_fields.push(quote! { #ident: Vec<u8>, });
         }
     }
+    if timestamp.is_some() {
+        packed_fields.push(quote! {
+            start_at: #timestamp_ty,
+            end_at: #timestamp_ty,
+        });
+    }
     let packed_fields = tokens(packed_fields);
 
     let filter = filter::generate(model.clone(), args.clone(), using_chrono, &timestamp_ty);
@@ -104,7 +111,8 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
 
     let load_and_delete = load::generate(&model, &timestamp, &group_by, &packed_name, &table_name);
     let decompress = decompress::generate(&model, &timestamp, &group_by, float_round, &table_name, using_chrono);
-    let store_and_store_grouped = store::generate(&model, &timestamp, &group_by, float_round, &table_name, using_chrono);
+    let store_and_store_grouped = store::generate(&model, &timestamp, &group_by, float_round, &table_name);
+    let new = new::generate(&model, &timestamp, &group_by, float_round, using_chrono);
     let serde = serde::generate();
 
     quote! {
@@ -118,6 +126,8 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
         }
 
         impl #packed_name {
+            #new
+
             #load_and_delete
 
             #decompress

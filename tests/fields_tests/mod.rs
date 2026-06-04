@@ -13,8 +13,8 @@ pub struct QueryStat {
 #[tokio::test]
 #[serial_test::serial]
 async fn test() -> anyhow::Result<()> {
-    assert_eq!(Fields::default().select(), "database_id, granularity, collected_at, fingerprint");
-    assert_eq!(Fields::required().select(), "database_id, granularity, collected_at");
+    assert_eq!(Fields::default().select(), "database_id, granularity, start_at, end_at, collected_at, fingerprint");
+    assert_eq!(Fields::required().select(), "database_id, granularity, start_at, end_at, collected_at");
 
     assert_eq!(Fields::default(), ().try_into().unwrap());
     assert_eq!(Fields::required(), vec![].try_into().unwrap());

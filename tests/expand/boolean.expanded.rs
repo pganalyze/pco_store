@@ -12,6 +12,20 @@ pub struct CompressedQueryStats {
     calls: Vec<u8>,
 }
 impl CompressedQueryStats {
+    pub fn new(rows: &Vec<QueryStat>) -> anyhow::Result<Self> {
+        Ok(Self {
+            database_id: rows[0].database_id.clone(),
+            toplevel: ::pco::standalone::simple_compress(
+                &rows.iter().map(|r| r.toplevel as u16).collect::<Vec<_>>(),
+                &::pco::ChunkConfig::default(),
+            )?,
+            calls: ::pco::standalone::simple_compress(
+                &rows.iter().map(|r| r.calls).collect::<Vec<_>>(),
+                &::pco::ChunkConfig::default(),
+            )?,
+            filter: None,
+        })
+    }
     /// Loads data for the specified filters.
     pub async fn load(
         db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
@@ -114,21 +128,10 @@ impl CompressedQueryStats {
             ::pin_utils::core_reexport::pin::Pin::new_unchecked(&mut writer)
         };
         for rows in grouped_rows.into_values() {
+            let row = Self::new(&rows)?;
             writer
                 .as_mut()
-                .write(
-                    &[
-                        &rows[0].database_id,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.toplevel as u16).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.calls).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                    ],
-                )
+                .write(&[&rows[0].database_id, &row.toplevel, &row.calls])
                 .await?;
         }
         writer.finish().await?;
@@ -171,21 +174,10 @@ impl CompressedQueryStats {
             ::pin_utils::core_reexport::pin::Pin::new_unchecked(&mut writer)
         };
         for rows in grouped_rows.into_values() {
+            let row = Self::new(&rows)?;
             writer
                 .as_mut()
-                .write(
-                    &[
-                        &rows[0].database_id,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.toplevel as u16).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                        &::pco::standalone::simple_compress(
-                            &rows.iter().map(|r| r.calls).collect::<Vec<_>>(),
-                            &::pco::ChunkConfig::default(),
-                        )?,
-                    ],
-                )
+                .write(&[&rows[0].database_id, &row.toplevel, &row.calls])
                 .await?;
         }
         writer.finish().await?;

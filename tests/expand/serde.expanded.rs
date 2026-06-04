@@ -669,8 +669,50 @@ pub struct CompressedSerdes {
     map: Vec<u8>,
     json: Vec<u8>,
     model: Vec<u8>,
+    start_at: DateTime<Utc>,
+    end_at: DateTime<Utc>,
 }
 impl CompressedSerdes {
+    pub fn new(rows: &Vec<Serde>) -> anyhow::Result<Self> {
+        let time: Vec<_> = rows.iter().map(|s| s.time).collect();
+        let start_at = *time.iter().min().unwrap();
+        let end_at = *time.iter().max().unwrap();
+        let time: Vec<u64> = time
+            .into_iter()
+            .map(|t| t.timestamp_micros() as u64)
+            .collect();
+        Ok(Self {
+            id: rows[0].id.clone(),
+            name: rows[0].name.clone(),
+            time: ::pco::standalone::simple_compress(
+                    &time,
+                    &::pco::ChunkConfig::default(),
+                )
+                .unwrap(),
+            start_at,
+            end_at,
+            description: serde_compress(
+                rows.iter().map(|r| r.description.clone()).collect::<Vec<_>>(),
+            )?,
+            tags: serde_compress(
+                rows.iter().map(|r| r.tags.clone()).collect::<Vec<_>>(),
+            )?,
+            nums: pco_compress_nested(
+                rows
+                    .iter()
+                    .map(|r| r.nums.iter().map(|v| *v).collect::<Vec<_>>())
+                    .collect::<Vec<_>>(),
+            )?,
+            map: serde_compress(rows.iter().map(|r| r.map.clone()).collect::<Vec<_>>())?,
+            json: serde_compress(
+                rows.iter().map(|r| r.json.clone()).collect::<Vec<_>>(),
+            )?,
+            model: serde_compress(
+                rows.iter().map(|r| r.model.clone()).collect::<Vec<_>>(),
+            )?,
+            filter: None,
+        })
+    }
     /// Loads data for the specified filters.
     pub async fn load(
         db: &impl ::std::ops::Deref<Target = deadpool_postgres::ClientWrapper>,
@@ -827,50 +869,22 @@ impl CompressedSerdes {
             ::pin_utils::core_reexport::pin::Pin::new_unchecked(&mut writer)
         };
         for rows in grouped_rows.into_values() {
-            let time: Vec<_> = rows.iter().map(|s| s.time).collect();
-            let start_at = *time.iter().min().unwrap();
-            let end_at = *time.iter().max().unwrap();
-            let time: Vec<u64> = time
-                .into_iter()
-                .map(|t| t.timestamp_micros() as u64)
-                .collect();
+            let row = Self::new(&rows)?;
             writer
                 .as_mut()
                 .write(
                     &[
                         &rows[0].id,
                         &rows[0].name,
-                        &start_at,
-                        &end_at,
-                        &::pco::standalone::simple_compress(
-                                &time,
-                                &::pco::ChunkConfig::default(),
-                            )
-                            .unwrap(),
-                        &serde_compress(
-                            rows
-                                .iter()
-                                .map(|r| r.description.clone())
-                                .collect::<Vec<_>>(),
-                        )?,
-                        &serde_compress(
-                            rows.iter().map(|r| r.tags.clone()).collect::<Vec<_>>(),
-                        )?,
-                        &pco_compress_nested(
-                            rows
-                                .iter()
-                                .map(|r| r.nums.iter().map(|v| *v).collect::<Vec<_>>())
-                                .collect::<Vec<_>>(),
-                        )?,
-                        &serde_compress(
-                            rows.iter().map(|r| r.map.clone()).collect::<Vec<_>>(),
-                        )?,
-                        &serde_compress(
-                            rows.iter().map(|r| r.json.clone()).collect::<Vec<_>>(),
-                        )?,
-                        &serde_compress(
-                            rows.iter().map(|r| r.model.clone()).collect::<Vec<_>>(),
-                        )?,
+                        &row.start_at,
+                        &row.end_at,
+                        &row.time,
+                        &row.description,
+                        &row.tags,
+                        &row.nums,
+                        &row.map,
+                        &row.json,
+                        &row.model,
                     ],
                 )
                 .await?;
@@ -923,50 +937,22 @@ impl CompressedSerdes {
             ::pin_utils::core_reexport::pin::Pin::new_unchecked(&mut writer)
         };
         for rows in grouped_rows.into_values() {
-            let time: Vec<_> = rows.iter().map(|s| s.time).collect();
-            let start_at = *time.iter().min().unwrap();
-            let end_at = *time.iter().max().unwrap();
-            let time: Vec<u64> = time
-                .into_iter()
-                .map(|t| t.timestamp_micros() as u64)
-                .collect();
+            let row = Self::new(&rows)?;
             writer
                 .as_mut()
                 .write(
                     &[
                         &rows[0].id,
                         &rows[0].name,
-                        &start_at,
-                        &end_at,
-                        &::pco::standalone::simple_compress(
-                                &time,
-                                &::pco::ChunkConfig::default(),
-                            )
-                            .unwrap(),
-                        &serde_compress(
-                            rows
-                                .iter()
-                                .map(|r| r.description.clone())
-                                .collect::<Vec<_>>(),
-                        )?,
-                        &serde_compress(
-                            rows.iter().map(|r| r.tags.clone()).collect::<Vec<_>>(),
-                        )?,
-                        &pco_compress_nested(
-                            rows
-                                .iter()
-                                .map(|r| r.nums.iter().map(|v| *v).collect::<Vec<_>>())
-                                .collect::<Vec<_>>(),
-                        )?,
-                        &serde_compress(
-                            rows.iter().map(|r| r.map.clone()).collect::<Vec<_>>(),
-                        )?,
-                        &serde_compress(
-                            rows.iter().map(|r| r.json.clone()).collect::<Vec<_>>(),
-                        )?,
-                        &serde_compress(
-                            rows.iter().map(|r| r.model.clone()).collect::<Vec<_>>(),
-                        )?,
+                        &row.start_at,
+                        &row.end_at,
+                        &row.time,
+                        &row.description,
+                        &row.tags,
+                        &row.nums,
+                        &row.map,
+                        &row.json,
+                        &row.model,
                     ],
                 )
                 .await?;
@@ -2197,6 +2183,8 @@ impl Filter {
 pub struct Fields {
     id: bool,
     name: bool,
+    start_at: bool,
+    end_at: bool,
     time: bool,
     description: bool,
     tags: bool,
@@ -2225,6 +2213,8 @@ impl ::core::fmt::Debug for Fields {
         let names: &'static _ = &[
             "id",
             "name",
+            "start_at",
+            "end_at",
             "time",
             "description",
             "tags",
@@ -2236,6 +2226,8 @@ impl ::core::fmt::Debug for Fields {
         let values: &[&dyn ::core::fmt::Debug] = &[
             &self.id,
             &self.name,
+            &self.start_at,
+            &self.end_at,
             &self.time,
             &self.description,
             &self.tags,
@@ -2253,7 +2245,8 @@ impl ::core::marker::StructuralPartialEq for Fields {}
 impl ::core::cmp::PartialEq for Fields {
     #[inline]
     fn eq(&self, other: &Fields) -> bool {
-        self.id == other.id && self.name == other.name && self.time == other.time
+        self.id == other.id && self.name == other.name && self.start_at == other.start_at
+            && self.end_at == other.end_at && self.time == other.time
             && self.description == other.description && self.tags == other.tags
             && self.nums == other.nums && self.map == other.map
             && self.json == other.json && self.model == other.model
@@ -2267,6 +2260,8 @@ impl Fields {
         Self {
             id: true,
             name: true,
+            start_at: true,
+            end_at: true,
             time: true,
             description: false,
             tags: false,
@@ -2288,7 +2283,7 @@ impl Fields {
         let mut fields = Vec::new();
         self.id.then(|| fields.push("id"));
         self.name.then(|| fields.push("name"));
-        self.time.then(|| fields.push("time"));
+        fields.extend(["start_at", "end_at", "time"]);
         self.description.then(|| fields.push("description"));
         self.tags.then(|| fields.push("tags"));
         self.nums.then(|| fields.push("nums"));
@@ -2319,12 +2314,20 @@ impl Fields {
             } else {
                 Default::default()
             },
-            time: if self.time {
+            start_at: {
                 let v = row.get(index);
                 index += 1;
                 v
-            } else {
-                Default::default()
+            },
+            end_at: {
+                let v = row.get(index);
+                index += 1;
+                v
+            },
+            time: {
+                let v = row.get(index);
+                index += 1;
+                v
             },
             description: if self.description {
                 let v = row.get(index);
@@ -2376,6 +2379,8 @@ impl Default for Fields {
         Self {
             id: true,
             name: true,
+            start_at: true,
+            end_at: true,
             time: true,
             description: true,
             tags: true,
@@ -2394,7 +2399,6 @@ impl TryFrom<&[&str]> for Fields {
             match *s {
                 "id" => fields.id = true,
                 "name" => fields.name = true,
-                "time" => fields.time = true,
                 "description" => fields.description = true,
                 "tags" => fields.tags = true,
                 "nums" => fields.nums = true,

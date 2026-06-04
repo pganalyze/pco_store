@@ -15,27 +15,50 @@ pub fn generate(model: ItemStruct, args: Arguments, packed_name: Ident) -> proc_
     for field in model.fields.iter() {
         let ident = field.ident.clone().unwrap();
         let name = format!("{ident}");
-        let is_timestamp = timestamp.as_ref().map(|t| *t == ident).unwrap_or(false);
-        fields.push(quote! { #ident: bool, });
-        if group_by.iter().any(|i| *i == ident) || is_timestamp {
-            required.push(quote! { #ident: true, });
-        } else {
-            required.push(quote! { #ident: false, });
-            merge_filter.push(quote! {
-                (!filter.#ident.is_empty()).then(|| self.#ident = true);
+        if timestamp.as_ref().map(|t| *t == ident).unwrap_or(false) {
+            fields.push(quote! { start_at: bool, end_at: bool, #ident: bool, });
+            required.push(quote! { start_at: true, end_at: true, #ident: true, });
+            select.push(quote! { fields.extend(["start_at", "end_at", #name]); });
+            load.push(quote! {
+                start_at: {
+                    let v = row.get(index);
+                    index += 1;
+                    v
+                },
+                end_at: {
+                    let v = row.get(index);
+                    index += 1;
+                    v
+                },
+                #ident: {
+                    let v = row.get(index);
+                    index += 1;
+                    v
+                },
             });
-        }
-        select.push(quote! { self.#ident.then(|| fields.push(#name)); });
-        load.push(quote! { #ident: if self.#ident {
-                let v = row.get(index);
-                index += 1;
-                v
+            default.push(quote! { start_at: true, end_at: true, #ident: true, });
+        } else {
+            fields.push(quote! { #ident: bool, });
+            if group_by.iter().any(|i| *i == ident) {
+                required.push(quote! { #ident: true, });
             } else {
-                Default::default()
-            },
-        });
-        default.push(quote! { #ident: true, });
-        from.push(quote! { #name => fields.#ident = true, });
+                required.push(quote! { #ident: false, });
+                merge_filter.push(quote! {
+                    (!filter.#ident.is_empty()).then(|| self.#ident = true);
+                });
+            }
+            select.push(quote! { self.#ident.then(|| fields.push(#name)); });
+            load.push(quote! { #ident: if self.#ident {
+                    let v = row.get(index);
+                    index += 1;
+                    v
+                } else {
+                    Default::default()
+                },
+            });
+            default.push(quote! { #ident: true, });
+            from.push(quote! { #name => fields.#ident = true, });
+        }
     }
     let fields = tokens(fields);
     let required = tokens(required);
