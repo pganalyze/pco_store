@@ -2,12 +2,9 @@
 
 ## Running tests
 
-Because this crate is a procedural macro, we commit expanded versions of the code to make changes easier to review.
+Simply run `cargo test`
 
-To run the tests and rewrite the expanded files:
-```sh
-MACROTEST=overwrite cargo test
-```
+Snapshots of the proc macro generated code are captured by the test suite in `tests/expand`
 
 ## Environment Setup
 

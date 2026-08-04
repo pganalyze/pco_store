@@ -9,11 +9,6 @@ mod fields_tests;
 mod filter_tests;
 mod serde_tests;
 
-#[test]
-fn macrotest() {
-    macrotest::expand("tests/expand/*.rs");
-}
-
 pub static DB_POOL: std::sync::LazyLock<std::sync::Arc<deadpool_postgres::Pool>> = std::sync::LazyLock::new(|| {
     if std::path::Path::new(".env").exists() {
         dotenvy::dotenv().unwrap();
