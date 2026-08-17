@@ -1,9 +1,11 @@
 use pco_pack::PcoPack;
 #[derive(PcoPack)]
-#[pco_pack(index = [database_id], float_round = 2u32)]
+#[pco_pack(timestamp = collected_at, index = [database_id, region])]
 pub struct QueryStat {
     pub database_id: i64,
-    pub toplevel: bool,
+    pub region: smol_str::SmolStr,
+    pub collected_at: chrono::DateTime<chrono::Utc>,
+    pub fingerprint: i64,
     pub calls: i64,
 }
 /// Type alias for the compressed chunk representation.
@@ -69,6 +71,45 @@ impl CompressedQueryStats {
                 }
             }
         }
+        if let Some(f) = filter.region.as_ref() {
+            match f {
+                pco_pack::StringFilter::Equal(v) => {
+                    where_clauses.push(format!("{} = ${}", "region", params.len() + 1));
+                    params.push(v);
+                }
+                pco_pack::StringFilter::Inclusion(vals) => {
+                    if !vals.is_empty() {
+                        where_clauses
+                            .push(format!("{} = ANY(${})", "region", params.len() + 1));
+                        params.push(vals);
+                    }
+                }
+            }
+        }
+        if let Some(f) = filter.collected_at.as_ref() {
+            match f {
+                pco_pack::DateTimeFilter::Equal(v) => {
+                    where_clauses.push(format!("end_at >= ${}", params.len() + 1));
+                    params.push(v);
+                    where_clauses.push(format!("start_at <= ${}", params.len() + 1));
+                    params.push(v);
+                }
+                pco_pack::DateTimeFilter::Inclusion(vals) => {
+                    if !vals.is_empty() {
+                        where_clauses.push(format!("end_at >= ${}", params.len() + 1));
+                        params.push(vals.first().unwrap());
+                        where_clauses.push(format!("start_at <= ${}", params.len() + 1));
+                        params.push(vals.last().unwrap());
+                    }
+                }
+                pco_pack::DateTimeFilter::Range { start, end } => {
+                    where_clauses.push(format!("end_at >= ${}", params.len() + 1));
+                    params.push(start);
+                    where_clauses.push(format!("start_at <= ${}", params.len() + 1));
+                    params.push(end);
+                }
+            }
+        }
         let sql_where = if where_clauses.is_empty() {
             String::new()
         } else {
@@ -76,7 +117,15 @@ impl CompressedQueryStats {
         };
         let filter_json: serde_json::Value = filter.clone().try_into()?;
         let fields = <QueryStat as PcoPack>::resolve_fields(&filter_json, fields)?;
-        let known: &[&str] = &["database_id", "toplevel", "calls"];
+        let known: &[&str] = &[
+            "database_id",
+            "region",
+            "start_at",
+            "end_at",
+            "collected_at",
+            "fingerprint",
+            "calls",
+        ];
         let select_columns: Vec<_> = known
             .iter()
             .filter(|c| fields.contains(*c))
@@ -99,7 +148,38 @@ impl CompressedQueryStats {
                         } else {
                             Default::default()
                         },
-                        toplevel: if fields.contains(&"toplevel") {
+                        region: if fields.contains(&"region") {
+                            let v = row.get::<_, String>(index);
+                            index += 1;
+                            <smol_str::SmolStr>::from(v)
+                        } else {
+                            Default::default()
+                        },
+                        start_at: if fields.contains(&"start_at") {
+                            let v = row.get::<_, chrono::DateTime<chrono::Utc>>(index);
+                            index += 1;
+                            v
+                        } else {
+                            Default::default()
+                        },
+                        end_at: if fields.contains(&"end_at") {
+                            let v = row.get::<_, chrono::DateTime<chrono::Utc>>(index);
+                            index += 1;
+                            v
+                        } else {
+                            Default::default()
+                        },
+                        collected_at: if fields.contains(&"collected_at") {
+                            let v = row.get::<_, Option<&[u8]>>(index);
+                            index += 1;
+                            v.map_or_else(
+                                Default::default,
+                                pco_pack::serde_bytes::ByteBuf::from,
+                            )
+                        } else {
+                            Default::default()
+                        },
+                        fingerprint: if fields.contains(&"fingerprint") {
                             let v = row.get::<_, Option<&[u8]>>(index);
                             index += 1;
                             v.map_or_else(
@@ -163,6 +243,45 @@ impl CompressedQueryStats {
                 }
             }
         }
+        if let Some(f) = filter.region.as_ref() {
+            match f {
+                pco_pack::StringFilter::Equal(v) => {
+                    where_clauses.push(format!("{} = ${}", "region", params.len() + 1));
+                    params.push(v);
+                }
+                pco_pack::StringFilter::Inclusion(vals) => {
+                    if !vals.is_empty() {
+                        where_clauses
+                            .push(format!("{} = ANY(${})", "region", params.len() + 1));
+                        params.push(vals);
+                    }
+                }
+            }
+        }
+        if let Some(f) = filter.collected_at.as_ref() {
+            match f {
+                pco_pack::DateTimeFilter::Equal(v) => {
+                    where_clauses.push(format!("end_at >= ${}", params.len() + 1));
+                    params.push(v);
+                    where_clauses.push(format!("start_at <= ${}", params.len() + 1));
+                    params.push(v);
+                }
+                pco_pack::DateTimeFilter::Inclusion(vals) => {
+                    if !vals.is_empty() {
+                        where_clauses.push(format!("end_at >= ${}", params.len() + 1));
+                        params.push(vals.first().unwrap());
+                        where_clauses.push(format!("start_at <= ${}", params.len() + 1));
+                        params.push(vals.last().unwrap());
+                    }
+                }
+                pco_pack::DateTimeFilter::Range { start, end } => {
+                    where_clauses.push(format!("end_at >= ${}", params.len() + 1));
+                    params.push(start);
+                    where_clauses.push(format!("start_at <= ${}", params.len() + 1));
+                    params.push(end);
+                }
+            }
+        }
         let sql_where = if where_clauses.is_empty() {
             String::new()
         } else {
@@ -170,7 +289,15 @@ impl CompressedQueryStats {
         };
         let filter_json: serde_json::Value = filter.clone().try_into()?;
         let fields = <QueryStat as PcoPack>::resolve_fields(&filter_json, fields)?;
-        let known: &[&str] = &["database_id", "toplevel", "calls"];
+        let known: &[&str] = &[
+            "database_id",
+            "region",
+            "start_at",
+            "end_at",
+            "collected_at",
+            "fingerprint",
+            "calls",
+        ];
         let select_columns: Vec<_> = known
             .iter()
             .filter(|c| fields.contains(*c))
@@ -194,7 +321,38 @@ impl CompressedQueryStats {
                         } else {
                             Default::default()
                         },
-                        toplevel: if fields.contains(&"toplevel") {
+                        region: if fields.contains(&"region") {
+                            let v = row.get::<_, String>(index);
+                            index += 1;
+                            <smol_str::SmolStr>::from(v)
+                        } else {
+                            Default::default()
+                        },
+                        start_at: if fields.contains(&"start_at") {
+                            let v = row.get::<_, chrono::DateTime<chrono::Utc>>(index);
+                            index += 1;
+                            v
+                        } else {
+                            Default::default()
+                        },
+                        end_at: if fields.contains(&"end_at") {
+                            let v = row.get::<_, chrono::DateTime<chrono::Utc>>(index);
+                            index += 1;
+                            v
+                        } else {
+                            Default::default()
+                        },
+                        collected_at: if fields.contains(&"collected_at") {
+                            let v = row.get::<_, Option<&[u8]>>(index);
+                            index += 1;
+                            v.map_or_else(
+                                Default::default,
+                                pco_pack::serde_bytes::ByteBuf::from,
+                            )
+                        } else {
+                            Default::default()
+                        },
+                        fingerprint: if fields.contains(&"fingerprint") {
                             let v = row.get::<_, Option<&[u8]>>(index);
                             index += 1;
                             v.map_or_else(
@@ -234,12 +392,16 @@ impl CompressedQueryStats {
             .prepare_cached(
                 &format!(
                     "COPY {} ({}) FROM STDIN BINARY", "query_stats",
-                    "database_id, toplevel, calls"
+                    "database_id, region, start_at, end_at, collected_at, fingerprint, calls"
                 ),
             )
             .await?;
         let types = &[
             tokio_postgres::types::Type::INT8,
+            tokio_postgres::types::Type::TEXT,
+            tokio_postgres::types::Type::TIMESTAMPTZ,
+            tokio_postgres::types::Type::TIMESTAMPTZ,
+            tokio_postgres::types::Type::BYTEA,
             tokio_postgres::types::Type::BYTEA,
             tokio_postgres::types::Type::BYTEA,
         ];
@@ -254,7 +416,11 @@ impl CompressedQueryStats {
                 .write(
                     &[
                         &chunk.database_id,
-                        &(*chunk.toplevel).to_vec(),
+                        &chunk.region.as_str(),
+                        &chunk.start_at,
+                        &chunk.end_at,
+                        &(*chunk.collected_at).to_vec(),
+                        &(*chunk.fingerprint).to_vec(),
                         &(*chunk.calls).to_vec(),
                     ],
                 )

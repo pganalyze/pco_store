@@ -1,8 +1,9 @@
 use ahash::AHashMap;
 use anyhow::Result;
+use chrono::{DateTime, Utc};
 use peak_alloc::PeakAlloc;
 use std::str::FromStr;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::{Duration, Instant};
 
 #[global_allocator]
 static PEAK_ALLOC: PeakAlloc = PeakAlloc;
@@ -29,8 +30,7 @@ async fn main() -> Result<()> {
     println!("peak memory usage: {:.0?}MB", PEAK_ALLOC.peak_usage_as_mb());
 
     println!();
-    println!("=== load (Vec)");
-
+    println!("=== load");
     PEAK_ALLOC.reset_peak_usage();
     let start = Instant::now();
     let pco_store_duration = load().await?;
@@ -38,21 +38,28 @@ async fn main() -> Result<()> {
     println!("peak memory usage: {:.0?}MB", PEAK_ALLOC.peak_usage_as_mb());
 
     println!();
-    println!("=== load (reduce)");
-
+    println!("=== reduce");
     PEAK_ALLOC.reset_peak_usage();
     let start = Instant::now();
-    let pco_store_duration = load_reduce().await?;
+    let pco_store_duration = reduce().await?;
+    println!("decompressed after {:.1?} ({:.1?} in pco_store)", start.elapsed(), pco_store_duration);
+    println!("peak memory usage: {:.0?}MB", PEAK_ALLOC.peak_usage_as_mb());
+
+    println!();
+    println!("=== filter");
+    PEAK_ALLOC.reset_peak_usage();
+    let start = Instant::now();
+    let pco_store_duration = filter().await?;
     println!("decompressed after {:.1?} ({:.1?} in pco_store)", start.elapsed(), pco_store_duration);
     println!("peak memory usage: {:.0?}MB", PEAK_ALLOC.peak_usage_as_mb());
 
     Ok(())
 }
 
-#[::pco_store::store(timestamp = collected_at, group_by = [database_id], float_round = 2, table_name = synthetic_pco_stores)]
+#[::pco_store::store(timestamp = collected_at, index = [database_id], float_round = 2, table_name = synthetic_pco_stores)]
 pub struct QueryStat {
     pub database_id: i64,
-    pub collected_at: SystemTime,
+    pub collected_at: DateTime<Utc>,
     pub collected_secs: i64,
     pub fingerprint: i64,
     pub postgres_role_id: i64,
@@ -64,7 +71,7 @@ pub struct QueryStat {
     pub shared_blks_read: i64,
 }
 
-static DEFAULT_COLLECTED_AT: std::sync::LazyLock<SystemTime> = std::sync::LazyLock::new(|| SystemTime::now());
+static DEFAULT_COLLECTED_AT: std::sync::LazyLock<DateTime<Utc>> = std::sync::LazyLock::new(Utc::now);
 
 impl Default for QueryStat {
     fn default() -> Self {
@@ -112,7 +119,7 @@ pub async fn store() -> Result<Duration> {
         for i in 0..100_000 {
             stats.push(QueryStat {
                 database_id: db_id,
-                collected_at: SystemTime::now(),
+                collected_at: Utc::now(),
                 collected_secs: 10,
                 fingerprint: i % 500,
                 postgres_role_id: i % 1_000,
@@ -135,31 +142,24 @@ pub async fn store() -> Result<Duration> {
 pub async fn load() -> Result<Duration> {
     let db = &DB_POOL.get().await.unwrap();
     let database_ids: Vec<i64> = db.query_one("SELECT array_agg(DISTINCT database_id) FROM synthetic_pco_stores", &[]).await?.get(0);
-    let mut stats = Vec::new();
-    let filter = Filter::new(&database_ids, SystemTime::UNIX_EPOCH..=SystemTime::now());
-
-    // This assumes the stats.push() call takes negligible time.
+    let filter = Filter::new(database_ids, DateTime::<Utc>::UNIX_EPOCH..=Utc::now());
     let start = Instant::now();
-    for group in CompressedQueryStats::load(db, filter, ()).await? {
-        for stat in group.decompress()? {
-            stats.push(stat);
-        }
+    for chunk in CompressedQueryStats::load(db, filter, &[]).await? {
+        let _stats = chunk.decompress()?;
     }
     return Ok(start.elapsed());
 }
 
-pub async fn load_reduce() -> Result<Duration> {
+pub async fn reduce() -> Result<Duration> {
     let db = &DB_POOL.get().await.unwrap();
     let database_ids: Vec<i64> = db.query_one("SELECT array_agg(DISTINCT database_id) FROM synthetic_pco_stores", &[]).await?.get(0);
     let mut stats: AHashMap<(i64, i64, i64), QueryStat> = AHashMap::new();
-    let filter = Filter::new(&database_ids, SystemTime::UNIX_EPOCH..=SystemTime::now());
-
+    let filter = Filter::new(database_ids, DateTime::<Utc>::UNIX_EPOCH..=Utc::now());
     let start = Instant::now();
-    for group in CompressedQueryStats::load(db, filter, ()).await? {
-        for stat in group.decompress()? {
+    for chunk in CompressedQueryStats::load(db, filter, &[]).await? {
+        for stat in chunk.decompress()? {
             let key = (stat.database_id, stat.fingerprint, stat.postgres_role_id);
             let entry = stats.entry(key).or_default();
-
             entry.database_id = stat.database_id;
             entry.collected_at = stat.collected_at;
             entry.collected_secs += stat.collected_secs;
@@ -174,5 +174,19 @@ pub async fn load_reduce() -> Result<Duration> {
         }
     }
 
+    return Ok(start.elapsed());
+}
+
+// Loads a single fingerprint for a single database
+pub async fn filter() -> Result<Duration> {
+    let db = &DB_POOL.get().await.unwrap();
+    let mut filter = Filter::new(50, DateTime::<Utc>::UNIX_EPOCH..=Utc::now());
+    filter.fingerprint = Some((200).into());
+    let start = Instant::now();
+    let mut count = 0;
+    for chunk in CompressedQueryStats::load(db, filter, &[]).await? {
+        count += chunk.decompress()?.len();
+    }
+    assert_eq!(count, 200);
     return Ok(start.elapsed());
 }
