@@ -2,7 +2,7 @@ on:
   push:
   pull_request:
 
-env: 
+env:
   CARGO_TERM_COLOR: always
 
 jobs:
@@ -37,3 +37,10 @@ jobs:
       - run: cargo install cargo-expand
       - run: cargo test --workspace
       - run: cargo build --benches
+      - name: Verify there are no uncommitted changes
+        run: |
+          git diff --exit-code
+          if [ -n "$(git status --porcelain)" ]; then
+            echo "Found uncommitted changes in the working tree"
+            exit 1
+          fi

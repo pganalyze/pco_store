@@ -13,7 +13,7 @@ mod new;
 mod serde;
 mod store;
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct Arguments {
     timestamp: Option<Ident>,
     group_by: Vec<Ident>,
@@ -61,9 +61,13 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
     let a = args.clone();
     let i = item.clone();
     let args = parse_macro_input!(a as Arguments);
-    let Arguments { timestamp, group_by, float_round, table_name } = args.clone();
     let model = parse_macro_input!(i as ItemStruct);
     let item = proc_macro2::TokenStream::from(item);
+    generate_tokens(&model, args, item).into()
+}
+
+fn generate_tokens(model: &ItemStruct, args: Arguments, item: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
+    let Arguments { timestamp, group_by, float_round, table_name } = args.clone();
     let name = model.ident.clone();
     let packed_name = Ident::new(&format!("Compressed{}s", model.ident), Span::call_site());
 
@@ -109,10 +113,10 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
     let fields = fields::generate(model.clone(), args.clone(), packed_name.clone());
     let deserialize_time_range = timestamp_ty.map(|t| deserialize_time_range::generate(&t));
 
-    let load_and_delete = load::generate(&model, &timestamp, &group_by, &packed_name, &table_name);
-    let decompress = decompress::generate(&model, &timestamp, &group_by, float_round, &table_name, using_chrono);
-    let store_and_store_grouped = store::generate(&model, &timestamp, &group_by, float_round, &table_name);
-    let new = new::generate(&model, &timestamp, &group_by, float_round, using_chrono);
+    let load_and_delete = load::generate(model, &timestamp, &group_by, &packed_name, &table_name);
+    let decompress = decompress::generate(model, &timestamp, &group_by, float_round, &table_name, using_chrono);
+    let store_and_store_grouped = store::generate(model, &timestamp, &group_by, float_round, &table_name);
+    let new = new::generate(model, &timestamp, &group_by, float_round, using_chrono);
     let serde = serde::generate();
 
     quote! {
@@ -140,7 +144,6 @@ pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
         #deserialize_time_range
         #serde
     }
-    .into()
 }
 
 fn is_number(ty: &Type) -> bool {
@@ -171,4 +174,52 @@ fn tokens(input: Vec<proc_macro2::TokenStream>) -> proc_macro2::TokenStream {
     let mut tokens = proc_macro2::TokenStream::new();
     tokens.extend(input.into_iter());
     tokens
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::path::Path;
+
+    #[test]
+    fn expand_snapshots() {
+        let input_dir = Path::new("tests/expand");
+        let files = fs::read_dir(input_dir)
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().extension().map_or(false, |ext| ext == "rs"))
+            .filter(|e| !e.file_name().to_string_lossy().ends_with(".expanded.rs"));
+        for file in files {
+            let input_path = file.path();
+            let input = fs::read_to_string(&input_path).unwrap();
+            let file: syn::File = syn::parse_str(&input).unwrap();
+            let struct_item = file.items.iter().find_map(|item| if let syn::Item::Struct(s) = item { Some(s.clone()) } else { None }).unwrap();
+            // Parse the #[pco_store::store(...)] attribute
+            let args = parse_store_attrs(&struct_item.attrs).unwrap();
+            // Expand using the same logic as the proc_macro
+            let item_tokens: proc_macro2::TokenStream = syn::parse2(quote! { #struct_item }).unwrap();
+            let expanded = generate_tokens(&struct_item, args, item_tokens);
+            // Format with prettyplease
+            let parsed: syn::File = syn::parse2(expanded).unwrap();
+            let output = prettyplease::unparse(&parsed);
+            let output_path = input_path.with_extension("expanded.rs");
+            fs::write(&output_path, &output).unwrap();
+        }
+    }
+
+    fn parse_store_attrs(attrs: &[syn::Attribute]) -> std::result::Result<Arguments, syn::Error> {
+        for attr in attrs {
+            if let Some(segment) = attr.path().segments.last() {
+                if segment.ident == "store" {
+                    return match &attr.meta {
+                        syn::Meta::List(list) => list.parse_args::<Arguments>(),
+                        syn::Meta::Path(_) => Ok(Default::default()), // #[pco_store::store] with no args
+                        _ => Err(syn::Error::new_spanned(&attr, "unexpected attribute format")),
+                    };
+                }
+            }
+        }
+        Ok(Default::default())
+    }
 }
