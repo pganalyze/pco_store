@@ -1,9 +1,9 @@
 use super::*;
 
-#[::pco_store::store(timestamp = collected_at, group_by = [database_id], float_round = 2, table_name = comparison_pco_stores)]
+#[::pco_store::store(timestamp = collected_at, index = [database_id], float_round = 2, table_name = comparison_pco_stores)]
 pub struct QueryStat {
     pub database_id: i64,
-    pub collected_at: SystemTime,
+    pub collected_at: chrono::DateTime<chrono::Utc>,
     pub collected_secs: i64,
     pub fingerprint: i64,
     pub postgres_role_id: i64,
@@ -54,7 +54,7 @@ pub async fn store() -> Result<()> {
         for rows_ in grouped_rows.into_values() {
             let mut stats = Vec::new();
             for row in rows_ {
-                let collected_at: Vec<SystemTime> = row.get(1);
+                let collected_at: Vec<std::time::SystemTime> = row.get(1);
                 let collected_secs: Vec<i64> = row.get(2);
                 let fingerprint: Vec<i64> = row.get(3);
                 let postgres_role_id: Vec<i64> = row.get(4);
@@ -67,7 +67,7 @@ pub async fn store() -> Result<()> {
                 for (index, collected_at) in collected_at.into_iter().enumerate() {
                     stats.push(QueryStat {
                         database_id,
-                        collected_at,
+                        collected_at: collected_at.into(),
                         collected_secs: collected_secs[index],
                         fingerprint: fingerprint[index],
                         postgres_role_id: postgres_role_id[index],
@@ -89,12 +89,9 @@ pub async fn store() -> Result<()> {
 pub async fn load() -> Result<()> {
     let db = &DB_POOL.get().await.unwrap();
     let database_ids: Vec<i64> = db.query_one("SELECT array_agg(DISTINCT database_id) FROM comparison_pco_stores", &[]).await?.get(0);
-    let mut stats = Vec::new();
-    let filter = Filter::new(&database_ids, SystemTime::UNIX_EPOCH..=SystemTime::now());
-    for group in CompressedQueryStats::load(db, filter, ()).await? {
-        for stat in group.decompress()? {
-            stats.push(stat);
-        }
+    let filter = Filter::new(&database_ids, chrono::DateTime::<chrono::Utc>::UNIX_EPOCH..=chrono::Utc::now());
+    for chunk in CompressedQueryStats::load(db, filter.clone(), &[]).await? {
+        let _stats = chunk.decompress()?;
     }
     return Ok(());
 }

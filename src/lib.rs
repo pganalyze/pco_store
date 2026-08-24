@@ -1,179 +1,178 @@
-use proc_macro::TokenStream;
-use proc_macro2::Span;
-use quote::{ToTokens, quote};
-use syn::parse::{Parse, ParseStream};
-use syn::{Ident, ItemStruct, Lit, Result, Token, Type, bracketed, parse_macro_input};
+#![doc = include_str!("../README.md")]
+#![warn(missing_docs)]
 
-mod decompress;
-mod deserialize_time_range;
-mod fields;
-mod filter;
 mod load;
-mod new;
-mod serde;
+mod sql_where;
 mod store;
+
+use proc_macro::TokenStream;
+use quote::quote;
+use syn::parse::{Parse, ParseStream};
+use syn::{Expr, Ident, ItemStruct, Lit, Result, Token, bracketed, parse_macro_input};
 
 #[derive(Clone, Default)]
 struct Arguments {
-    timestamp: Option<Ident>,
-    group_by: Vec<Ident>,
-    float_round: Option<f32>,
-    table_name: Option<Ident>,
+    pub timestamp: Option<Ident>,
+    pub index: Vec<Ident>,
+    pub float_round: Option<u32>,
+    pub time_round: Option<Expr>,
+    pub chunk_size: Option<u32>,
+    pub table_name: Option<String>,
 }
 impl Parse for Arguments {
     fn parse(input: ParseStream) -> Result<Self> {
         let mut timestamp = None;
-        let mut group_by = Vec::new();
+        let mut index = Vec::new();
         let mut float_round = None;
+        let mut time_round = None;
+        let mut chunk_size = None;
         let mut table_name = None;
         while !input.is_empty() {
             let ident: Ident = input.parse()?;
             let _: Token![=] = input.parse()?;
             match ident.to_string().as_str() {
                 "timestamp" => timestamp = Some(input.parse()?),
-                "group_by" => {
+                "index" => {
                     let content;
                     bracketed!(content in input);
-                    group_by = content.parse_terminated(Ident::parse, Token![,])?.into_iter().collect();
+                    index = content.parse_terminated(Ident::parse, Token![,])?.into_iter().collect();
                 }
                 "float_round" => {
                     if let Lit::Int(value) = Lit::parse(input)? {
                         let value = value.base10_parse()?;
                         assert!(value > 0, "float_round must be greater than zero");
-                        float_round = Some(10i32.pow(value) as f32);
+                        float_round = Some(value);
                     } else {
-                        panic!("unsupported float_round value");
+                        return Err(input.error("unsupported float_round value"));
                     }
                 }
-                "table_name" => table_name = Some(input.parse()?),
+                "time_round" => time_round = Some(Expr::parse(input)?),
+                "chunk_size" => {
+                    if let Lit::Int(value) = Lit::parse(input)? {
+                        chunk_size = Some(value.base10_parse()?);
+                    } else {
+                        return Err(input.error("unsupported chunk_size value"));
+                    }
+                }
+                "table_name" => table_name = Some(input.parse::<Ident>()?.to_string()),
                 _ => {
-                    input.error("unexpected ident");
+                    return Err(input.error("unexpected ident"));
                 }
             }
             let _: Option<Token![,]> = input.parse().ok();
         }
-        Ok(Self { timestamp, group_by, float_round, table_name })
+        Ok(Self { timestamp, index, float_round, time_round, chunk_size, table_name })
     }
 }
 
 #[proc_macro_attribute]
+/// Derives pco_pack's PcoPack trait and generates a compressed storage wrapper
+/// (CompressedStructName) with store, load, and delete methods.
+#[doc(hidden)]
 pub fn store(args: TokenStream, item: TokenStream) -> TokenStream {
-    let a = args.clone();
-    let i = item.clone();
-    let args = parse_macro_input!(a as Arguments);
-    let model = parse_macro_input!(i as ItemStruct);
-    let item = proc_macro2::TokenStream::from(item);
-    generate_tokens(&model, args, item).into()
+    let args = parse_macro_input!(args as Arguments);
+    let model = parse_macro_input!(item as ItemStruct);
+    generate_tokens(&model, args).into()
 }
 
-fn generate_tokens(model: &ItemStruct, args: Arguments, item: proc_macro2::TokenStream) -> proc_macro2::TokenStream {
-    let Arguments { timestamp, group_by, float_round, table_name } = args.clone();
+fn compute_table_name(model: &ItemStruct, override_name: Option<String>) -> String {
+    if let Some(name) = override_name {
+        return name;
+    }
+    let mut table_name = String::new();
+    for c in model.ident.to_string().chars() {
+        if c.is_uppercase() && !table_name.is_empty() {
+            table_name += "_";
+        }
+        table_name += &c.to_lowercase().to_string();
+    }
+    table_name += "s";
+    table_name
+}
+
+fn generate_tokens(model: &ItemStruct, args: Arguments) -> proc_macro2::TokenStream {
+    let Arguments { timestamp, index, float_round, time_round, chunk_size, table_name } = args.clone();
     let name = model.ident.clone();
-    let packed_name = Ident::new(&format!("Compressed{}s", model.ident), Span::call_site());
+    let compressed_name = Ident::new(&format!("Compressed{}s", name.to_string()), name.span());
+    let table_name = compute_table_name(model, table_name);
 
-    let table_name = if let Some(table_name) = table_name {
-        table_name.to_string()
-    } else {
-        let mut table_name = String::new();
-        for c in model.ident.to_string().chars() {
-            if c.is_uppercase() && table_name.len() > 0 {
-                table_name += "_";
-            }
-            table_name += &c.to_lowercase().to_string();
-        }
-        table_name += "s";
-        table_name
-    };
+    // Build pco_pack attribute arguments forwarded from ours
+    let pco_pack_attrs = build_pco_pack_attrs(&timestamp, &index, float_round.as_ref(), time_round.as_ref(), chunk_size);
 
-    let mut packed_fields = vec![quote! { filter: Option<Filter>, }];
-    let mut timestamp_ty = None;
-    let mut using_chrono = false;
-    for field in model.fields.iter() {
-        let ident = field.ident.clone().unwrap();
-        let ty = field.ty.clone();
-        if group_by.iter().any(|i| *i == ident) {
-            packed_fields.push(quote! { #ident: #ty, });
-        } else if timestamp.as_ref().map(|t| *t == ident).unwrap_or(false) {
-            using_chrono = !ty.to_token_stream().to_string().contains("SystemTime");
-            timestamp_ty = Some(ty.clone());
-            packed_fields.push(quote! { #ident: Vec<u8>, });
-        } else {
-            packed_fields.push(quote! { #ident: Vec<u8>, });
-        }
-    }
-    if timestamp.is_some() {
-        packed_fields.push(quote! {
-            start_at: #timestamp_ty,
-            end_at: #timestamp_ty,
-        });
-    }
-    let packed_fields = tokens(packed_fields);
+    // Remove any #[pco_store::store(...)] attributes
+    let mut model_stripped = model.clone();
+    model_stripped.attrs.retain(|attr| !is_pco_store_attr(attr));
 
-    let filter = filter::generate(model.clone(), args.clone(), using_chrono, &timestamp_ty);
-    let fields = fields::generate(model.clone(), args.clone(), packed_name.clone());
-    let deserialize_time_range = timestamp_ty.map(|t| deserialize_time_range::generate(&t));
-
-    let load_and_delete = load::generate(model, &timestamp, &group_by, &packed_name, &table_name);
-    let decompress = decompress::generate(model, &timestamp, &group_by, float_round, &table_name, using_chrono);
-    let store_and_store_grouped = store::generate(model, &timestamp, &group_by, float_round, &table_name);
-    let new = new::generate(model, &timestamp, &group_by, float_round, using_chrono);
-    let serde = serde::generate();
+    let load_and_delete = load::generate(model.clone(), timestamp.as_ref(), index.clone(), table_name.clone());
+    let store = store::generate(model, timestamp.as_ref(), index.clone(), table_name);
 
     quote! {
-        use serde::Deserialize as _;
+        use pco_pack::PcoPack;
+        #[derive(PcoPack)]
+        #pco_pack_attrs
+        #model_stripped
 
-        #item
+        /// Type alias for the compressed chunk representation.
+        pub type Chunk = <#name as PcoPack>::Chunk;
 
-        #[doc=concat!(" Generated by pco_store to store and load compressed versions of [", stringify!(#name), "]")]
-        pub struct #packed_name {
-            #packed_fields
+        /// Typed filter struct provided by pco_pack.
+        pub type Filter = <#name as PcoPack>::Filter;
+
+        /// A single row of compressed data that can be decompressed on demand.
+        pub struct #compressed_name {
+            chunk: Chunk,
+            filter: Filter,
+            fields: Vec<String>,
         }
 
-        impl #packed_name {
-            #new
+        impl std::ops::Deref for #compressed_name {
+            type Target = Chunk;
+            fn deref(&self) -> &Self::Target {
+                &self.chunk
+            }
+        }
 
+        impl #compressed_name {
+            /// Decompresses this chunk using the filter and fields used to load it.
+            pub fn decompress(&self) -> anyhow::Result<Vec<#name>> {
+                let fields: Vec<&str> = self.fields.iter().map(|s| s.as_str()).collect();
+                <#name as PcoPack>::filter(std::slice::from_ref(&self.chunk), self.filter.clone(), &fields)
+            }
             #load_and_delete
-
-            #decompress
-
-            #store_and_store_grouped
+            #store
         }
-
-        #filter
-        #fields
-        #deserialize_time_range
-        #serde
     }
 }
 
-fn is_number(ty: &Type) -> bool {
-    let ty = quote! { #ty }.to_string();
-    match ty.as_str() {
-        "u8" | "u16" | "u32" | "u64" => true,
-        "i8" | "i16" | "i32" | "i64" => true,
-        "f32" | "f64" => true,
-        "bool" => true,
-        _ => false,
+fn build_pco_pack_attrs(
+    timestamp: &Option<Ident>, index: &[Ident], float_round: Option<&u32>, time_round: Option<&Expr>, chunk_size: Option<u32>,
+) -> proc_macro2::TokenStream {
+    let mut attrs = Vec::new();
+    if let Some(ts) = timestamp {
+        attrs.push(quote! { timestamp = #ts });
     }
+    if !index.is_empty() {
+        attrs.push(quote! { index = [#(#index),*] });
+    }
+    if let Some(f) = float_round {
+        attrs.push(quote! { float_round = #f });
+    }
+    if let Some(tr) = time_round {
+        attrs.push(quote! { time_round = #tr });
+    }
+    if let Some(cs) = chunk_size {
+        attrs.push(quote! { chunk_size = #cs });
+    }
+    quote! { #[pco_pack(#(#attrs),*)] }
 }
 
-fn is_nested_number(ty: &Type) -> bool {
-    let ty = quote! { #ty }.to_string();
-    // Remove syn's added spacing, turning "Vec < i32 >" into "Vec<i32>"
-    let ty = ty.replace(" < ", "<").replace(" >", ">");
-    match ty.as_str() {
-        "Vec<u8>" | "Vec<u16>" | "Vec<u32>" | "Vec<u64>" => true,
-        "Vec<i8>" | "Vec<i16>" | "Vec<i32>" | "Vec<i64>" => true,
-        "Vec<f32>" | "Vec<f64>" => true,
-        "Vec<bool>" => true,
-        _ => false,
+fn is_pco_store_attr(attr: &syn::Attribute) -> bool {
+    if attr.path().segments.len() < 2 {
+        return false;
     }
-}
-
-fn tokens(input: Vec<proc_macro2::TokenStream>) -> proc_macro2::TokenStream {
-    let mut tokens = proc_macro2::TokenStream::new();
-    tokens.extend(input.into_iter());
-    tokens
+    let crate_name = attr.path().segments.first().unwrap().ident.to_string();
+    let func_name = attr.path().segments.last().unwrap().ident.to_string();
+    (crate_name == "pco_store" || crate_name == "crate") && func_name == "store"
 }
 
 #[cfg(test)]
@@ -198,11 +197,12 @@ mod tests {
             // Parse the #[pco_store::store(...)] attribute
             let args = parse_store_attrs(&struct_item.attrs).unwrap();
             // Expand using the same logic as the proc_macro
-            let item_tokens: proc_macro2::TokenStream = syn::parse2(quote! { #struct_item }).unwrap();
-            let expanded = generate_tokens(&struct_item, args, item_tokens);
-            // Format with prettyplease
-            let parsed: syn::File = syn::parse2(expanded).unwrap();
-            let output = prettyplease::unparse(&parsed);
+            let expanded = generate_tokens(&struct_item, args);
+            // Try to format with prettyplease; if it fails (e.g. references external crates), write raw tokens
+            let output = match syn::parse2::<syn::File>(expanded.clone()) {
+                Ok(parsed) => prettyplease::unparse(&parsed),
+                Err(_) => expanded.to_string(),
+            };
             let output_path = input_path.with_extension("expanded.rs");
             fs::write(&output_path, &output).unwrap();
         }
