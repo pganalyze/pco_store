@@ -61,17 +61,44 @@ fn index_filter(field: &Ident, rust_ty: &syn::Type) -> proc_macro2::TokenStream 
     }
 }
 
+// Body of an Inclusion arm: one value renders as a plain equality, two or more values as a
+// single `= ANY($n)` array parameter.
+//
+// Single values use equality deliberately. Postgres prunes LIST partitions for `col = $n` even in
+// a generic plan (the OpExpr branch of match_clause_to_partition_key in partprune.c matches a
+// scalar param), while for `col = ANY($n)` the array operand is a Param, which partprune gives up
+// on, scanning every partition. Multi-value lists keep one ANY parameter so the number of distinct
+// SQL texts, cached prepared statements, and server-side generic plans stays bounded; that loses
+// pruning only for filters covering two but not all partitions, whereas the usual multi-granularity
+// query wants all granularities and has nothing to prune. Single-element inclusion and Equal
+// therefore generate identical SQL.
+fn inclusion_arm(name: &str, cast: &str, any_cast: &str) -> proc_macro2::TokenStream {
+    let eq_fmt = format!("{{}} = ${{}}{cast}");
+    let any_fmt = format!("{{}} = ANY(${{}}{any_cast})");
+    quote! {
+        match vals.as_slice() {
+            [] => {}
+            [v] => {
+                where_clauses.push(format!(#eq_fmt, #name, params.len() + 1));
+                params.push(v);
+            }
+            _ => {
+                where_clauses.push(format!(#any_fmt, #name, params.len() + 1));
+                params.push(vals);
+            }
+        }
+    }
+}
+
 fn build_i64_filter(name: &str) -> proc_macro2::TokenStream {
+    let inclusion = inclusion_arm(name, "", "");
     quote! {
         pco_pack::I64Filter::Equal(v) => {
             where_clauses.push(format!("{} = ${}", #name, params.len() + 1));
             params.push(v);
         }
         pco_pack::I64Filter::Inclusion(vals) => {
-            if !vals.is_empty() {
-                where_clauses.push(format!("{} = ANY(${})", #name, params.len() + 1));
-                params.push(vals);
-            }
+            #inclusion
         }
         pco_pack::I64Filter::Range { start, end } => {
             where_clauses.push(format!("{} >= ${} AND {} <= ${}", #name, params.len() + 1, #name, params.len() + 2));
@@ -81,19 +108,18 @@ fn build_i64_filter(name: &str) -> proc_macro2::TokenStream {
     }
 }
 
-// pco_pack represents i32 filters as I64Filter; the `::bigint` casts keep the comparison in the
-// bigint domain, which also covers the int4 column type.
+// pco_pack represents i32 filters as I64Filter; the `::bigint` casts keep the comparison in
+// the bigint domain, matching the i64 values bound by the client. Postgres still prunes and
+// indexes int4 columns with such comparisons via the cross-type int4/int8 operators.
 fn build_i32_filter(name: &str) -> proc_macro2::TokenStream {
+    let inclusion = inclusion_arm(name, "::bigint", "::bigint[]");
     quote! {
         pco_pack::I64Filter::Equal(val) => {
             where_clauses.push(format!("{} = ${}::bigint", #name, params.len() + 1));
             params.push(val);
         }
         pco_pack::I64Filter::Inclusion(vals) => {
-            if !vals.is_empty() {
-                where_clauses.push(format!("{} = ANY(${}::bigint[])", #name, params.len() + 1));
-                params.push(vals);
-            }
+            #inclusion
         }
         pco_pack::I64Filter::Range { start, end } => {
             where_clauses.push(format!("{} >= ${}::bigint AND {} <= ${}::bigint", #name, params.len() + 1, #name, params.len() + 2));
@@ -104,46 +130,40 @@ fn build_i32_filter(name: &str) -> proc_macro2::TokenStream {
 }
 
 fn build_string_filter(name: &str) -> proc_macro2::TokenStream {
+    let inclusion = inclusion_arm(name, "", "");
     quote! {
         pco_pack::StringFilter::Equal(v) => {
             where_clauses.push(format!("{} = ${}", #name, params.len() + 1));
             params.push(v);
         }
         pco_pack::StringFilter::Inclusion(vals) => {
-            if !vals.is_empty() {
-                where_clauses.push(format!("{} = ANY(${})", #name, params.len() + 1));
-                params.push(vals);
-            }
+            #inclusion
         }
     }
 }
 
 fn build_uuid_filter(name: &str) -> proc_macro2::TokenStream {
+    let inclusion = inclusion_arm(name, "", "");
     quote! {
         pco_pack::UuidFilter::Equal(v) => {
             where_clauses.push(format!("{} = ${}", #name, params.len() + 1));
             params.push(v);
         }
         pco_pack::UuidFilter::Inclusion(vals) => {
-            if !vals.is_empty() {
-                where_clauses.push(format!("{} = ANY(${})", #name, params.len() + 1));
-                params.push(vals);
-            }
+            #inclusion
         }
     }
 }
 
 fn build_bool_filter(name: &str) -> proc_macro2::TokenStream {
+    let inclusion = inclusion_arm(name, "", "");
     quote! {
         pco_pack::BoolFilter::Equal(v) => {
             where_clauses.push(format!("{} = ${}", #name, params.len() + 1));
             params.push(v);
         }
         pco_pack::BoolFilter::Inclusion(vals) => {
-            if !vals.is_empty() {
-                where_clauses.push(format!("{} = ANY(${})", #name, params.len() + 1));
-                params.push(vals);
-            }
+            #inclusion
         }
     }
 }
