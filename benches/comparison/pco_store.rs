@@ -1,6 +1,7 @@
 use super::*;
 
 #[::pco_store::store(timestamp = collected_at, index = [database_id], float_round = 2, table_name = comparison_pco_stores)]
+#[derive(Clone)]
 pub struct QueryStat {
     pub database_id: i64,
     pub collected_at: chrono::DateTime<chrono::Utc>,

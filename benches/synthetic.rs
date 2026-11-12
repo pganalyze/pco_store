@@ -57,6 +57,7 @@ async fn main() -> Result<()> {
 }
 
 #[::pco_store::store(timestamp = collected_at, index = [database_id], float_round = 2, table_name = synthetic_pco_stores)]
+#[derive(Clone)]
 pub struct QueryStat {
     pub database_id: i64,
     pub collected_at: DateTime<Utc>,

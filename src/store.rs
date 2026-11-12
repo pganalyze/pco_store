@@ -62,13 +62,11 @@ fn map_rust_type_to_pg(ty: syn::Type) -> proc_macro2::TokenStream {
     match type_last_segment(&ty).as_deref() {
         Some("i64") => quote! { tokio_postgres::types::Type::INT8 },
         Some("i32") => quote! { tokio_postgres::types::Type::INT4 },
-        Some("f64") => quote! { tokio_postgres::types::Type::FLOAT8 },
-        Some("f32") => quote! { tokio_postgres::types::Type::FLOAT4 },
         Some("String") | Some("SmolStr") => quote! { tokio_postgres::types::Type::TEXT },
         Some("Uuid") => quote! { tokio_postgres::types::Type::UUID },
         Some("bool") => quote! { tokio_postgres::types::Type::BOOL },
         _ => {
-            panic!("unsupported index field type: {}; supported types are i64, i32, f64, f32, String, SmolStr, Uuid, and bool", ty.to_token_stream())
+            panic!("unsupported index field type: {}; supported types are i64, i32, String, SmolStr, Uuid, and bool", ty.to_token_stream())
         }
     }
 }

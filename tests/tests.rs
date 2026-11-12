@@ -439,6 +439,7 @@ async fn no_index() {
 #[serial_test::serial]
 async fn table_name() {
     #[pco_store::store(table_name = other)]
+    #[derive(Clone)]
     pub struct QueryStat {
         pub database_id: i64,
         pub calls: i64,
@@ -477,6 +478,7 @@ async fn table_name() {
 #[serial_test::serial]
 async fn float_round() {
     #[pco_store::store(index = [database_id], float_round = 2)]
+    #[derive(Clone)]
     pub struct QueryStat {
         pub database_id: i64,
         pub calls: i64,
@@ -513,6 +515,7 @@ async fn float_round() {
     DB_POOL.manager().statement_caches.clear();
     {
         #[pco_store::store(index = [database_id], float_round = 3)]
+        #[derive(Clone)]
         pub struct QueryStat {
             pub database_id: i64,
             pub calls: i64,

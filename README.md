@@ -33,7 +33,7 @@ To see what pco_store generates, look at [tests/expand](tests/expand) or run `ca
 The `pco_store::store` macro generates a compressed storage wrapper type (`CompressedStructName`) with `load`, `delete`, and `store` functions. It accepts these arguments:
 
 - `timestamp = field` marks a timestamp field for range-based chunk filtering; adds `start_at`/`end_at` columns to the table. The field must be `chrono::DateTime<Utc>`
-- `index = [fields]` groups rows by these fields and stores them uncompressed in Postgres for efficient SQL-level filtering before decompression. Supported types: `i64`, `i32`, `f64`, `f32`, `String`, `smol_str::SmolStr`, `uuid::Uuid`, `bool`
+- `index = [fields]` groups rows by these fields and stores them uncompressed in Postgres for efficient SQL-level filtering before decompression. Supported types: `i64`, `i32`, `String`, `smol_str::SmolStr`, `uuid::Uuid`, `bool`
 - `float_round = N` rounds float values to `N` decimal places to improve compression (values stored as i64 internally)
 - `time_round = chrono::Duration::seconds(N)` rounds timestamps to the nearest multiple of the given duration (e.g. 10 seconds) for better compression
 - `chunk_size = N` sets the chunk size (default 32,768) used for serialization
