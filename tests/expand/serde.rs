@@ -1,4 +1,4 @@
-#[pco_store::store(group_by = [id, name], timestamp = time)]
+#[pco_store::store(index = [id, name], timestamp = time)]
 #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Serde {
     pub id: Uuid,

@@ -1,7 +1,7 @@
-#[pco_store::store(timestamp = collected_at, group_by = [database_id])]
+#[pco_store::store(timestamp = collected_at, index = [database_id])]
 pub struct QueryStat {
     pub database_id: i64,
-    pub collected_at: SystemTime,
+    pub collected_at: chrono::DateTime<chrono::Utc>,
     pub collected_secs: i64,
     pub fingerprint: i64,
     pub postgres_role_id: i64,

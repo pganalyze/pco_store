@@ -2,13 +2,11 @@
 
 These benchmarks use the `query_stats` table from the pganalyze staging environment (which doesn't contain any customer data). This data is collected from [pg_stat_statements](https://www.postgresql.org/docs/current/pgstatstatements.html) every minute and then sent to pganalyze every 10 minutes.
 
-The first two benchmarks incrementally improve the compression ratio by changing the data model. Then the `comparison.rs` benchmark compares the resulting data model with different compression methods.
+For more detailed benchmarks, see pco_pack's [benches/README.md](https://github.com/pganalyze/pco_pack/blob/main/benches/README.md).
 
 Size is listed in megabytes, and times are listed in seconds.
 
-## Data model considerations
-
-### `bucket_size.rs`
+## `bucket_size.rs`
 
 Compacting the data from 10 minute buckets to 24 hour buckets improves the compression ratio and read/write time.
 
@@ -16,45 +14,30 @@ The ideal bucket size will depend on your workload. A larger bucket results in b
 
 |                                    | Size | Write time | Read time | Average bucket size |
 | ---------------------------------- | ---- | ---------- | --------- | ------------------- |
-| 1 day bucket (pco)                 | 217  | 18.5       | 2.0       | 28,433              |
-| 10 minute bucket (pco)             | 318  | 30.7       | 4.5       | 214                 |
+| 1 day bucket (pco)                 | 217  | 9.0        | 1.0       | 28,433              |
+| 10 minute bucket (pco)             | 321  | 18.8       | 2.0       | 214                 |
 | 10 minute bucket (Postgres arrays) | 485  |            |           | 214                 |
 
-### `float.rs`
-
-Rounding the `total_time` and `io_time` float values to varying levels of precision can significantly improve the compression ratio. Converting the floats into integers that are multiplied by 10^N at write time to preserve the desired fractional precision further improves the compression ratio.
-
-Reducing the float precision to 2 decimal points reduces the size by 29% (217 MB -> 155 MB). Then using an integer representation further reduces the size by 31% (155 MB -> 107 MB). Combined, that's a 51% improvement.
-
-|                                           | Size | Write time | Read time |
-| ----------------------------------------- | ---- | ---------- | --------- |
-| `bucket_size.rs` winner (as baseline)     | 217  | 18.5       | 2.0       |
-| rounded to 0 decimals                     | 106  | 15.8       | 1.9       |
-| rounded to 1 decimal                      | 132  | 16.6       | 1.8       |
-| rounded to 2 decimals                     | 155  | 17.7       | 1.8       |
-| multiplied by 1 and casted to integer     | 89   | 14.5       | 1.8       |
-| multiplied by 10 and casted to integer    | 97   | 14.7       | 1.7       |
-| multiplied by 100 and casted to integer   | 107  | 15.0       | 1.6       |
-
-## Overall results
-
-### `comparison.rs`
+## `comparison.rs`
 
 Now with the optimized data model, this benchmark compares the performance of using pco, pco_store, or Postgres array types.
 
 |                 | Size | Write time | Read time | Compression method |
 | --------------- | ---- | ---------- | --------- | ------------------ |
-| pco             | 107  | 14.8       | 1.6       | pco                |
-| pco_store       | 107  | 15.8       | 1.7       | pco                |
-| Postgres arrays | 207  | 82.7       | 10.2      | Postgres pglz      |
+| pco             | 107  | 8.3        | 0.8       | pco                |
+| pco_store       | 120  | 9.9        | 1.1       | pco                |
+| Postgres arrays | 207  | 53.5       | 5.2       | Postgres pglz      |
 
-## Others
+## `synthetic.rs`
 
-### `chrono.rs`
+Unlike the previous benchmarks, this generates synthetic data and measures the time and peak memory usage of each operation.
 
-The standard library `SystemTime` is being used depsite [chrono's](https://crates.io/crates/chrono) more feature-complete API because adding durations to a timestamp (in `decompress`) is noticeably slower when using chrono.
-
-TODO: write this benchmark
+| Operation    | Time   | Peak memory |
+| ------------ | ------ | ----------- |
+| store        | 983 ms | 2304 MB     |
+| load         | 395 ms | 7 MB        |
+| reduce       | 468 ms | 26 MB       |
+| filter       | 2 ms   | 3 MB        |
 
 # Setup
 
