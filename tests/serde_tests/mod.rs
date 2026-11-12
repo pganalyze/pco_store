@@ -1,8 +1,11 @@
 use super::DB_POOL;
 use anyhow::Context;
 use chrono::{DateTime, Duration, Utc};
+use pco_store::pco_pack::PcoPack;
+use pco_store::{Backend, PcoStore, pco_store};
 use serde_json::json;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 use uuid::Uuid;
 
 #[tokio::test]
@@ -14,8 +17,8 @@ async fn string() -> anyhow::Result<()> {
     let t3 = t2 + Duration::seconds(1);
 
     {
-        #[pco_store::store(index = [id, name], timestamp = time)]
-        #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+        #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize, PcoStore)]
+        #[pco_store(index = [id, name], timestamp = time)]
         pub struct Model {
             pub id: Uuid,
             pub name: String,
@@ -27,9 +30,11 @@ async fn string() -> anyhow::Result<()> {
             pub json: serde_json::Value,
         }
 
-        async fn load(db: &deadpool_postgres::Client, filter: Filter) -> anyhow::Result<Vec<Model>> {
+        type Filter = <Model as PcoPack>::Filter;
+
+        async fn load(pg: &Arc<dyn Backend<Model>>, filter: Filter) -> anyhow::Result<Vec<Model>> {
             let mut rows = Vec::new();
-            for chunk in CompressedModels::load(db, filter, &[]).await? {
+            for chunk in pg.load(&filter, &[]).await? {
                 rows.extend(chunk.decompress()?);
             }
             rows.sort_by_key(|s| (s.id, s.name.clone(), s.time));
@@ -37,6 +42,7 @@ async fn string() -> anyhow::Result<()> {
         }
 
         let db = &DB_POOL.get().await?;
+        let pg = super::pg::<Model>();
         let sql = "
             DROP TABLE IF EXISTS models;
             CREATE TABLE models (
@@ -69,29 +75,29 @@ async fn string() -> anyhow::Result<()> {
             ..a.clone()
         };
         let data = vec![a1.clone(), a2.clone()];
-        CompressedModels::store(db, data.clone()).await?;
+        pg.store(&Model::write(data.clone())?).await?;
 
         // Filtering by a single timestamp
-        let actual = load(db, Filter::new([id], ["a"], t..=t)).await?;
+        let actual = load(&pg, Filter::new([id], ["a"], t..=t)).await?;
         assert_eq!(actual, vec![a1.clone()]);
 
         // Filtering the whole time range
-        let actual = load(db, Filter::new([id], ["a"], t..=t2)).await?;
+        let actual = load(&pg, Filter::new([id], ["a"], t..=t2)).await?;
         assert_eq!(actual, data);
 
         // Filtering by compressed String field via JSON filter
         {
             let mut filter = Filter::new([id], ["a"], t..=t2);
             filter["description"] = serde_json::json!(["other"]);
-            let actual = load(db, filter).await?;
+            let actual = load(&pg, filter).await?;
             assert_eq!(actual, vec![a2.clone()]);
         }
     }
 
     // Adding a new column to the table doesn't break decompression of existing rows
     {
-        #[pco_store::store(index = [id, name], timestamp = time)]
-        #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+        #[derive(Clone, Debug, Default, PartialEq, serde::Serialize, serde::Deserialize, PcoStore)]
+        #[pco_store(index = [id, name], timestamp = time)]
         pub struct Model {
             pub id: Uuid,
             pub name: String,
@@ -105,9 +111,11 @@ async fn string() -> anyhow::Result<()> {
             pub new: bool,
         }
 
-        async fn load(db: &deadpool_postgres::Client, filter: Filter) -> anyhow::Result<Vec<Model>> {
+        type Filter = <Model as PcoPack>::Filter;
+
+        async fn load(pg: &Arc<dyn Backend<Model>>, filter: Filter) -> anyhow::Result<Vec<Model>> {
             let mut rows = Vec::new();
-            for chunk in CompressedModels::load(db, filter, &[]).await? {
+            for chunk in pg.load(&filter, &[]).await? {
                 rows.extend(chunk.decompress()?);
             }
             rows.sort_by_key(|s| (s.id, s.name.clone(), s.time));
@@ -115,17 +123,18 @@ async fn string() -> anyhow::Result<()> {
         }
 
         let db = &DB_POOL.get().await?;
+        let pg = super::pg::<Model>();
         db.execute("ALTER TABLE models ADD COLUMN new bytea STORAGE EXTERNAL DEFAULT '' NOT NULL", &[]).await?;
 
         let a = Model { id, name: "a".into(), time: t3, new: true, ..Default::default() };
-        CompressedModels::store(db, vec![a.clone()]).await?;
+        pg.store(&Model::write(vec![a.clone()])?).await?;
 
         // Filtering by a single timestamp
-        let actual = load(db, Filter::new([id], ["a"], t3..=t3)).await?;
+        let actual = load(&pg, Filter::new([id], ["a"], t3..=t3)).await?;
         assert_eq!(actual, vec![a.clone()]);
 
         // Filtering the whole time range (includes old rows with new=false default)
-        let actual = load(db, Filter::new([id], ["a"], t..=t3)).await?;
+        let actual = load(&pg, Filter::new([id], ["a"], t..=t3)).await?;
         assert_eq!(actual.len(), 3);
 
         // Filtering by new field via JSON filter (bool uses scalar, not array)
@@ -135,7 +144,7 @@ async fn string() -> anyhow::Result<()> {
         {
             let mut filter = Filter::new([id], ["a"], t..=t3);
             filter["new"] = serde_json::json!(true);
-            let actual = load(db, filter).await?;
+            let actual = load(&pg, filter).await?;
             // Verify at least the row with new=true is returned
             assert!(actual.iter().any(|m| m.new == true));
         }

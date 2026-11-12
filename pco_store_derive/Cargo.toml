@@ -1,0 +1,28 @@
+[package]
+name = "pco_store_derive"
+version = "0.2.0"
+edition = "2024"
+license = "MIT"
+description = "Storage macros for pco_store"
+repository = "https://github.com/pganalyze/pco_store"
+publish = false
+
+[lib]
+proc-macro = true
+
+# pco_store forwards these (with default-features = false) to say which
+# Backend impls the derive emits. Defaults stay off so a workspace-wide
+# feature union never leaks a backend into a build that did not ask for
+# it; the snapshot test asks for both explicitly.
+[features]
+default = []
+fs = []
+postgres = []
+
+[dependencies]
+proc-macro2 = "1.0"
+quote = "1.0"
+syn = { version = "2.0", features = ["full"] }
+
+[dev-dependencies]
+prettyplease = "0.2"

@@ -20,17 +20,17 @@ If you run that exact command, the value you want for `DATABASE_URL` is `postgre
 
 ### Verifying your setup
 
-You can test your setup by specifying `DATABASE_URL` and running `cargo test`:
+You can test your setup by specifying `DATABASE_URL` and running `cargo test --features postgres`:
 
 ```
-DATABASE_URL=postgresql://postgres@localhost:5432/postgres cargo test
+DATABASE_URL=postgresql://postgres@localhost:5432/postgres cargo test --features postgres
 ```
 
 ## Running tests
 
-Simply run `cargo test`
+Simply run `cargo test`; add `--features postgres` for the Postgres suites as well.
 
-The integration tests in `tests/` require the Postgres instance from above; the proc macro expansion tests do not. The expansion tests rewrite the generated code snapshots in `tests/expand` on every run, so if you change the macro, commit the updated snapshots alongside your changes (CI fails on uncommitted changes).
+The integration tests in `tests/` require the Postgres instance from above; the proc macro expansion tests do not. The expansion tests rewrite the generated code snapshots in `pco_store_derive/tests/expand_derive` on every run, so if you change the macro, commit the updated snapshots alongside your changes (CI fails on uncommitted changes).
 
 `pco_pack` is pulled from git (https://github.com/pganalyze/pco_pack). If you also develop `pco_pack` locally, you can point the dependency at your checkout with a `[patch]` section in `Cargo.toml`:
 

@@ -1,5 +1,5 @@
 use super::*;
-use quote::ToTokens;
+use quote::{ToTokens, quote};
 use syn::Field;
 use syn::punctuated::Punctuated;
 use syn::token::Comma;
@@ -13,13 +13,13 @@ pub fn generate(fields: Punctuated<Field, Comma>, index_fields: &[Ident], timest
         clauses.push(quote! {
             if let Some(f) = filter.#ts_ident.as_ref() {
                 match f {
-                    pco_pack::TimeFilter::Equal(v) => {
+                    pco_store::pco_pack::TimeFilter::Equal(v) => {
                         where_clauses.push(format!("end_at >= ${}", params.len() + 1));
                         params.push(v);
                         where_clauses.push(format!("start_at <= ${}", params.len() + 1));
                         params.push(v);
                     }
-                    pco_pack::TimeFilter::Inclusion(vals) => {
+                    pco_store::pco_pack::TimeFilter::Inclusion(vals) => {
                         if !vals.is_empty() {
                             where_clauses.push(format!("end_at >= ${}", params.len() + 1));
                             params.push(vals.first().unwrap());
@@ -27,7 +27,7 @@ pub fn generate(fields: Punctuated<Field, Comma>, index_fields: &[Ident], timest
                             params.push(vals.last().unwrap());
                         }
                     }
-                    pco_pack::TimeFilter::Range { start, end } => {
+                    pco_store::pco_pack::TimeFilter::Range { start, end } => {
                         where_clauses.push(format!("end_at >= ${}", params.len() + 1));
                         params.push(start);
                         where_clauses.push(format!("start_at <= ${}", params.len() + 1));
@@ -93,14 +93,14 @@ fn inclusion_arm(name: &str, cast: &str, any_cast: &str) -> proc_macro2::TokenSt
 fn build_i64_filter(name: &str) -> proc_macro2::TokenStream {
     let inclusion = inclusion_arm(name, "", "");
     quote! {
-        pco_pack::I64Filter::Equal(v) => {
+        pco_store::pco_pack::I64Filter::Equal(v) => {
             where_clauses.push(format!("{} = ${}", #name, params.len() + 1));
             params.push(v);
         }
-        pco_pack::I64Filter::Inclusion(vals) => {
+        pco_store::pco_pack::I64Filter::Inclusion(vals) => {
             #inclusion
         }
-        pco_pack::I64Filter::Range { start, end } => {
+        pco_store::pco_pack::I64Filter::Range { start, end } => {
             where_clauses.push(format!("{} >= ${} AND {} <= ${}", #name, params.len() + 1, #name, params.len() + 2));
             params.push(start);
             params.push(end);
@@ -114,14 +114,14 @@ fn build_i64_filter(name: &str) -> proc_macro2::TokenStream {
 fn build_i32_filter(name: &str) -> proc_macro2::TokenStream {
     let inclusion = inclusion_arm(name, "::bigint", "::bigint[]");
     quote! {
-        pco_pack::I64Filter::Equal(val) => {
+        pco_store::pco_pack::I64Filter::Equal(val) => {
             where_clauses.push(format!("{} = ${}::bigint", #name, params.len() + 1));
             params.push(val);
         }
-        pco_pack::I64Filter::Inclusion(vals) => {
+        pco_store::pco_pack::I64Filter::Inclusion(vals) => {
             #inclusion
         }
-        pco_pack::I64Filter::Range { start, end } => {
+        pco_store::pco_pack::I64Filter::Range { start, end } => {
             where_clauses.push(format!("{} >= ${}::bigint AND {} <= ${}::bigint", #name, params.len() + 1, #name, params.len() + 2));
             params.push(start);
             params.push(end);
@@ -132,11 +132,11 @@ fn build_i32_filter(name: &str) -> proc_macro2::TokenStream {
 fn build_string_filter(name: &str) -> proc_macro2::TokenStream {
     let inclusion = inclusion_arm(name, "", "");
     quote! {
-        pco_pack::StringFilter::Equal(v) => {
+        pco_store::pco_pack::StringFilter::Equal(v) => {
             where_clauses.push(format!("{} = ${}", #name, params.len() + 1));
             params.push(v);
         }
-        pco_pack::StringFilter::Inclusion(vals) => {
+        pco_store::pco_pack::StringFilter::Inclusion(vals) => {
             #inclusion
         }
     }
@@ -145,11 +145,11 @@ fn build_string_filter(name: &str) -> proc_macro2::TokenStream {
 fn build_uuid_filter(name: &str) -> proc_macro2::TokenStream {
     let inclusion = inclusion_arm(name, "", "");
     quote! {
-        pco_pack::UuidFilter::Equal(v) => {
+        pco_store::pco_pack::UuidFilter::Equal(v) => {
             where_clauses.push(format!("{} = ${}", #name, params.len() + 1));
             params.push(v);
         }
-        pco_pack::UuidFilter::Inclusion(vals) => {
+        pco_store::pco_pack::UuidFilter::Inclusion(vals) => {
             #inclusion
         }
     }
@@ -158,11 +158,11 @@ fn build_uuid_filter(name: &str) -> proc_macro2::TokenStream {
 fn build_bool_filter(name: &str) -> proc_macro2::TokenStream {
     let inclusion = inclusion_arm(name, "", "");
     quote! {
-        pco_pack::BoolFilter::Equal(v) => {
+        pco_store::pco_pack::BoolFilter::Equal(v) => {
             where_clauses.push(format!("{} = ${}", #name, params.len() + 1));
             params.push(v);
         }
-        pco_pack::BoolFilter::Inclusion(vals) => {
+        pco_store::pco_pack::BoolFilter::Inclusion(vals) => {
             #inclusion
         }
     }

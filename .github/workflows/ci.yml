@@ -35,8 +35,8 @@ jobs:
       - uses: Swatinem/rust-cache@27b8ea9368cf428f0bfe41b0876b1a7e809d9844
       - run: cargo fmt --all -- --check
       - run: cargo install cargo-expand
-      - run: cargo test --workspace
-      - run: cargo build --benches
+      - run: cargo test --workspace --all-features
+      - run: cargo build --benches --all-features
       - name: Verify there are no uncommitted changes
         run: |
           git diff --exit-code

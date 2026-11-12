@@ -1,3 +1,8 @@
+# Our own workspace: pco_store is the runtime lib, pco_store_derive carries
+# the macro (the pattern pco_pack already uses).
+[workspace]
+members = [".", "pco_store_derive"]
+
 [package]
 name = "pco_store"
 version = "0.2.0"
@@ -9,34 +14,46 @@ categories = ["compression", "database"]
 keywords = ["compression", "timeseries", "postgres"]
 repository = "https://github.com/pganalyze/pco_store"
 
-[lib]
-proc-macro = true
-
 [dependencies]
 anyhow = "1.0"
-deadpool-postgres = "0.14"
-futures = "0.3"
-pco = "1.0"
 pco_pack = { git = "https://github.com/pganalyze/pco_pack" }
-proc-macro2 = "1.0"
-quote = "1.0"
-syn = "2.0"
-tokio-postgres = "0.7"
-zstd = "0.13"
+# default-features stay off: pco_store's own features below pick which
+# backend impls the derive emits, so the dep spec never re-enables defaults.
+pco_store_derive = { version = "0.2.0", path = "pco_store_derive", default-features = false }
 
+# The Postgres adapter compiles only under the postgres feature:
+# local-only builds pick the fs adapter and never carry this stack.
+deadpool-postgres = { version = "0.14", optional = true }
+tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-uuid-1"], optional = true }
+
+[features]
+# Backends are a build property, not a per-model attribute: each feature
+# forwards to the derive, which emits that adapter's Backend impl for
+# every model.
+default = ["fs"]
+fs = ["pco_store_derive/fs"]
+postgres = ["dep:deadpool-postgres", "dep:tokio-postgres", "pco_store_derive/postgres"]
+
+# The Postgres test suites and benches compile the macro output, so the
+# Postgres stack is dev-only here; the runtime backend trait and filesystem
+# backend need pco_pack plus std and anyhow.
 [dev-dependencies]
 ahash = "0.8"
 chrono = { version = "0.4", features = ["serde"] }
+deadpool-postgres = "0.14"
 dotenvy = "0.15"
+futures = "0.3"
 peak_alloc = "0.2"
-prettyplease = "0.2"
+pco = "1.0"
 serde = { version = "1.0", features = ["derive"] }
-serde_json = { version = "1.0" }
+serde_json = "1.0"
 serial_test = "3.2"
 smol_str = "0.3"
+tempfile = "3"
 tokio = { version = "1.43", features = ["full"] }
 tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-uuid-1"] }
 uuid = { version = "1.23", features = ["serde"] }
+zstd = "0.13"
 
 [[bench]]
 name = "bucket_size"
@@ -45,7 +62,9 @@ harness = false
 [[bench]]
 name = "comparison"
 harness = false
+required-features = ["postgres"]
 
 [[bench]]
 name = "synthetic"
 harness = false
+required-features = ["postgres"]

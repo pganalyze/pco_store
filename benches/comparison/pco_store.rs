@@ -1,7 +1,9 @@
-use super::*;
+use super::{AHashMap, DB_POOL, DateTime, DurationRound, SystemTime, Utc};
+use anyhow::Result;
+use pco_store::{PcoStore, pco_store};
 
-#[::pco_store::store(timestamp = collected_at, index = [database_id], float_round = 2, table_name = comparison_pco_stores)]
-#[derive(Clone)]
+#[derive(Clone, PcoStore)]
+#[pco_store(name = comparison_pco_stores, timestamp = collected_at, index = [database_id], float_round = 2)]
 pub struct QueryStat {
     pub database_id: i64,
     pub collected_at: chrono::DateTime<chrono::Utc>,
@@ -16,8 +18,10 @@ pub struct QueryStat {
     pub shared_blks_read: i64,
 }
 
+type Filter = pco_store::Filter<QueryStat>;
+
 pub async fn store() -> Result<()> {
-    let db = &mut DB_POOL.get().await.unwrap();
+    let db = &DB_POOL.get().await.unwrap();
     let sql = "
         DROP TABLE IF EXISTS comparison_pco_stores;
         CREATE TABLE comparison_pco_stores (
@@ -81,7 +85,7 @@ pub async fn store() -> Result<()> {
                     });
                 }
             }
-            CompressedQueryStats::store(db, stats).await?;
+            QueryStat::store(db, stats).await?;
         }
     }
     Ok(())
@@ -92,8 +96,8 @@ pub async fn load() -> Result<()> {
     let database_ids: Vec<i64> = db.query_one("SELECT array_agg(DISTINCT database_id) FROM comparison_pco_stores", &[]).await?.get(0);
     let mut stats = Vec::new();
     let filter = Filter::new(&database_ids, chrono::DateTime::<chrono::Utc>::UNIX_EPOCH..=chrono::Utc::now());
-    for chunk in CompressedQueryStats::load(db, filter.clone(), &[]).await? {
+    for chunk in QueryStat::load(db, &filter, &[]).await? {
         stats.extend(chunk.decompress()?);
     }
-    return Ok(());
+    Ok(())
 }

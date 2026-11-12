@@ -1,6 +1,8 @@
 use ahash::AHashMap;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
+use pco_store::pg::Postgres;
+use pco_store::{PcoStore, pco_store};
 use peak_alloc::PeakAlloc;
 use std::str::FromStr;
 use std::time::{Duration, Instant};
@@ -56,8 +58,8 @@ async fn main() -> Result<()> {
     Ok(())
 }
 
-#[::pco_store::store(timestamp = collected_at, index = [database_id], float_round = 2, table_name = synthetic_pco_stores)]
-#[derive(Clone)]
+#[derive(Clone, PcoStore)]
+#[pco_store(name = synthetic_pco_stores, timestamp = collected_at, index = [database_id], float_round = 2)]
 pub struct QueryStat {
     pub database_id: i64,
     pub collected_at: DateTime<Utc>,
@@ -70,6 +72,12 @@ pub struct QueryStat {
     pub io_time: f64,
     pub shared_blks_hit: i64,
     pub shared_blks_read: i64,
+}
+
+type Filter = pco_store::Filter<QueryStat>;
+
+fn pg() -> Postgres {
+    Postgres::new(DB_POOL.clone())
 }
 
 static DEFAULT_COLLECTED_AT: std::sync::LazyLock<DateTime<Utc>> = std::sync::LazyLock::new(Utc::now);
@@ -135,7 +143,8 @@ pub async fn store() -> Result<Duration> {
     }
 
     let start = Instant::now();
-    CompressedQueryStats::store(db, stats).await?;
+    let pg = pg();
+    QueryStat::store(&pg, stats).await?;
 
     Ok(start.elapsed())
 }
@@ -146,7 +155,7 @@ pub async fn load() -> Result<Duration> {
     let mut stats = Vec::new();
     let filter = Filter::new(database_ids, DateTime::<Utc>::UNIX_EPOCH..=Utc::now());
     let start = Instant::now();
-    for chunk in CompressedQueryStats::load(db, filter, &[]).await? {
+    for chunk in QueryStat::load(db, &filter, &[]).await? {
         stats.extend(chunk.decompress()?);
     }
     return Ok(start.elapsed());
@@ -158,7 +167,7 @@ pub async fn reduce() -> Result<Duration> {
     let mut stats: AHashMap<(i64, i64, i64), QueryStat> = AHashMap::new();
     let filter = Filter::new(database_ids, DateTime::<Utc>::UNIX_EPOCH..=Utc::now());
     let start = Instant::now();
-    for chunk in CompressedQueryStats::load(db, filter, &[]).await? {
+    for chunk in QueryStat::load(db, &filter, &[]).await? {
         for stat in chunk.decompress()? {
             let key = (stat.database_id, stat.fingerprint, stat.postgres_role_id);
             let entry = stats.entry(key).or_default();
@@ -181,12 +190,12 @@ pub async fn reduce() -> Result<Duration> {
 
 // Loads a single fingerprint for a single database
 pub async fn filter() -> Result<Duration> {
-    let db = &DB_POOL.get().await.unwrap();
+    let pg = pg();
     let mut filter = Filter::new(50, DateTime::<Utc>::UNIX_EPOCH..=Utc::now());
     filter.fingerprint = Some((200).into());
     let start = Instant::now();
     let mut count = 0;
-    for chunk in CompressedQueryStats::load(db, filter, &[]).await? {
+    for chunk in QueryStat::load(&pg, &filter, &[]).await? {
         count += chunk.decompress()?.len();
     }
     assert_eq!(count, 200);
