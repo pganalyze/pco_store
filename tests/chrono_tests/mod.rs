@@ -1,4 +1,6 @@
 use chrono::{DateTime, NaiveDate, Utc};
+use pco_store::pco_pack::PcoPack;
+use pco_store::{PcoStore, pco_store};
 
 fn ymd_hms_micros(year: i32, month: u32, day: u32, hour: u32, min: u32, sec: u32, micros: u32) -> Option<DateTime<Utc>> {
     Some(NaiveDate::from_ymd_opt(year, month, day)?.and_hms_micro_opt(hour, min, sec, micros)?.and_utc())
@@ -7,18 +9,21 @@ fn ymd_hms_micros(year: i32, month: u32, day: u32, hour: u32, min: u32, sec: u32
 #[tokio::test]
 #[serial_test::serial]
 async fn chrono_timestamp() {
-    #[derive(Clone, Eq, Hash, PartialEq)]
-    #[pco_store::store(timestamp = collected_at, index = [database_id])]
+    #[derive(Clone, Eq, Hash, PartialEq, PcoStore)]
+    #[pco_store(timestamp = collected_at, index = [database_id])]
     pub struct QueryStat {
         pub database_id: i64,
         pub collected_at: chrono::DateTime<Utc>,
     }
+
+    type Filter = <QueryStat as PcoPack>::Filter;
 
     let database_id = 1;
     let start = ymd_hms_micros(2026, 01, 01, 1, 01, 02, 345_678).unwrap();
     let end = ymd_hms_micros(2026, 01, 01, 5, 03, 04, 567_890).unwrap();
 
     let db = &super::DB_POOL.get().await.unwrap();
+    let pg = super::pg::<QueryStat>();
     let sql = "
         DROP TABLE IF EXISTS query_stats;
         CREATE TABLE query_stats (
@@ -38,14 +43,14 @@ async fn chrono_timestamp() {
 
     // Write first two rows
     let stats = vec![QueryStat { database_id, collected_at: time_1_23_45 }];
-    CompressedQueryStats::store(db, stats).await.unwrap();
+    pg.store(&QueryStat::write(stats).unwrap()).await.unwrap();
     let stats = vec![QueryStat { database_id, collected_at: time_2_34_56 }];
-    CompressedQueryStats::store(db, stats).await.unwrap();
+    pg.store(&QueryStat::write(stats).unwrap()).await.unwrap();
 
     // Read back all rows in range
     {
         let mut actual = Vec::new();
-        for chunk in CompressedQueryStats::load(db, Filter::new([database_id], start..=end), &[]).await.unwrap() {
+        for chunk in pg.load(&Filter::new([database_id], start..=end), &[]).await.unwrap() {
             actual.extend(chunk.decompress().unwrap());
         }
         assert_eq!(actual.len(), 2);
@@ -55,12 +60,12 @@ async fn chrono_timestamp() {
 
     // Write a third row
     let stats = vec![QueryStat { database_id, collected_at: time_3_45_00 }];
-    CompressedQueryStats::store(db, stats).await.unwrap();
+    pg.store(&QueryStat::write(stats).unwrap()).await.unwrap();
 
     // Read back all three rows
     {
         let mut actual = Vec::new();
-        for chunk in CompressedQueryStats::load(db, Filter::new([database_id], start..=end), &[]).await.unwrap() {
+        for chunk in pg.load(&Filter::new([database_id], start..=end), &[]).await.unwrap() {
             actual.extend(chunk.decompress().unwrap());
         }
         assert_eq!(actual.len(), 3);

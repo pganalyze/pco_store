@@ -1,8 +1,11 @@
 use anyhow::Context;
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
+use pco_store::pco_pack::PcoPack;
+use pco_store::{Backend, PcoStore, pco_store};
+use std::sync::Arc;
 
-#[pco_store::store(timestamp = collected_at, index = [database_id, granularity])]
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, PcoStore)]
+#[pco_store(timestamp = collected_at, index = [database_id, granularity])]
 pub struct QueryStat {
     pub database_id: i64,
     pub granularity: i32,
@@ -10,22 +13,24 @@ pub struct QueryStat {
     pub fingerprint: i64,
 }
 
+type Filter = <QueryStat as PcoPack>::Filter;
+
 #[tokio::test]
 #[serial_test::serial]
 async fn test() -> anyhow::Result<()> {
-    // Convenience functions on Filter for timestamp manipulation (provided by pco_pack)
     let t = DateTime::from_timestamp_micros(Utc::now().timestamp_micros()).context("out of range")?;
-    let t2 = t + Duration::seconds(1);
+    let t2 = t + chrono::Duration::seconds(1);
     let mut filter = Filter::default();
     filter.collected_at = Some((t..=t2).into());
-    assert_eq!(filter.range_duration()?, Duration::seconds(1));
+    assert_eq!(filter.range_duration()?, chrono::Duration::seconds(1));
     assert_eq!(filter.range_bounds()?, (t, t2));
-    filter.range_shift(Duration::days(1))?;
-    assert_eq!(filter.range_bounds()?, (t + Duration::days(1), t2 + Duration::days(1)));
-    filter.range_shift(Duration::days(-2))?;
-    assert_eq!(filter.range_bounds()?, (t - Duration::days(1), t2 - Duration::days(1)));
+    filter.range_shift(chrono::Duration::days(1))?;
+    assert_eq!(filter.range_bounds()?, (t + chrono::Duration::days(1), t2 + chrono::Duration::days(1)));
+    filter.range_shift(chrono::Duration::days(-2))?;
+    assert_eq!(filter.range_bounds()?, (t - chrono::Duration::days(1), t2 - chrono::Duration::days(1)));
 
     let db = &super::DB_POOL.get().await?;
+    let pg = super::pg::<QueryStat>();
     let sql = "
         DROP TABLE IF EXISTS query_stats;
         CREATE TABLE query_stats (
@@ -45,45 +50,45 @@ async fn test() -> anyhow::Result<()> {
     stats.push(QueryStat { fingerprint: 1, ..s });
     stats.push(QueryStat { fingerprint: 2, ..s });
     stats.push(QueryStat { fingerprint: 3, collected_at: t2, ..s });
-    CompressedQueryStats::store(db, stats.clone()).await?;
+    pg.store(&QueryStat::write(stats.clone())?).await?;
 
     // Filtering by a single timestamp
-    let actual = load(db, Filter::new([5], [60], t..=t)).await?;
+    let actual = load(&pg, Filter::new([5], [60], t..=t)).await?;
     assert_eq!(actual, vec![QueryStat { fingerprint: 1, ..s }, QueryStat { fingerprint: 2, ..s }]);
 
     // Filtering the whole time range
-    let actual = load(db, Filter::new([5], [60], t..=t2)).await?;
+    let actual = load(&pg, Filter::new([5], [60], t..=t2)).await?;
     assert_eq!(actual, stats);
 
     // Optional filter via JSON field access - set fingerprint filter in JSON using IndexMut
     {
         let mut filter = Filter::new([5], [60], t..=t2);
         filter["fingerprint"] = serde_json::json!([2]);
-        let actual = load(db, filter).await?;
+        let actual = load(&pg, filter).await?;
         assert_eq!(actual, vec![QueryStat { fingerprint: 2, ..s }]);
     }
 
     // Delete returns the deleted chunks matching the filter; verify by comparing with load.
     {
-        let before_delete = load(db, Filter::new([5], [60], t..=t2)).await?;
+        let before_delete = load(&pg, Filter::new([5], [60], t..=t2)).await?;
         assert_eq!(before_delete.len(), 3);
-        let deleted = CompressedQueryStats::delete(db, Filter::new([5], [60], t..=t2), &[]).await?;
+        let deleted = pg.delete(&Filter::new([5], [60], t..=t2)).await?;
         let mut deleted_decompressed = Vec::new();
         for chunk in &deleted {
             deleted_decompressed.extend(chunk.decompress()?);
         }
         deleted_decompressed.sort_by_key(|s| (s.fingerprint, s.collected_at));
         assert_eq!(deleted_decompressed, before_delete);
-        let after_delete = load(db, Filter::new([5], [60], t..=t2)).await?;
+        let after_delete = load(&pg, Filter::new([5], [60], t..=t2)).await?;
         assert_eq!(after_delete.len(), 0);
     }
 
     Ok(())
 }
 
-async fn load(db: &deadpool_postgres::Client, filter: Filter) -> anyhow::Result<Vec<QueryStat>> {
+async fn load(pg: &Arc<dyn Backend<QueryStat>>, filter: Filter) -> anyhow::Result<Vec<QueryStat>> {
     let mut rows = Vec::new();
-    for chunk in CompressedQueryStats::load(db, filter, &[]).await? {
+    for chunk in pg.load(&filter, &[]).await? {
         rows.extend(chunk.decompress()?);
     }
     rows.sort_by_key(|s| (s.fingerprint, s.collected_at));

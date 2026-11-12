@@ -1,8 +1,11 @@
 use anyhow::Context;
 use chrono::{DateTime, Utc};
+use pco_store::pco_pack::PcoPack;
+use pco_store::{Backend, PcoStore, pco_store};
+use std::sync::Arc;
 
-#[pco_store::store(timestamp = collected_at, index = [database_id, granularity])]
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, PcoStore)]
+#[pco_store(timestamp = collected_at, index = [database_id, granularity])]
 pub struct QueryStat {
     pub database_id: i64,
     pub granularity: i32,
@@ -10,10 +13,13 @@ pub struct QueryStat {
     pub fingerprint: i64,
 }
 
+type Filter = <QueryStat as PcoPack>::Filter;
+
 #[tokio::test]
 #[serial_test::serial]
 async fn test() -> anyhow::Result<()> {
     let db = &super::DB_POOL.get().await?;
+    let pg = super::pg::<QueryStat>();
     let sql = "
         DROP TABLE IF EXISTS query_stats;
         CREATE TABLE query_stats (
@@ -33,27 +39,27 @@ async fn test() -> anyhow::Result<()> {
     let mut stats = Vec::new();
     stats.push(QueryStat { fingerprint: 1, ..s });
     stats.push(QueryStat { fingerprint: 2, ..s });
-    CompressedQueryStats::store(db, stats.clone()).await?;
+    pg.store(&QueryStat::write(stats.clone())?).await?;
 
     // Including all fields (empty slice means "all fields")
     let full = vec![QueryStat { fingerprint: 1, ..s }, QueryStat { fingerprint: 2, ..s }];
-    assert_eq!(full, load(db, Filter::new([5], [60], t..=t), &[]).await?);
+    assert_eq!(full, load(&pg, Filter::new([5], [60], t..=t), &[]).await?);
 
     // Requesting specific field by name
-    assert_eq!(full, load(db, Filter::new([5], [60], t..=t), &["fingerprint"]).await?);
+    assert_eq!(full, load(&pg, Filter::new([5], [60], t..=t), &["fingerprint"]).await?);
 
     // Error case: unknown field name is rejected by pco_pack
-    assert!(load(db, Filter::new([5], [60], t..=t), &["other"]).await.is_err());
+    assert!(load(&pg, Filter::new([5], [60], t..=t), &["other"]).await.is_err());
 
     // Optional filters are automatically included in the fields to be loaded
     let mut f = Filter::new([5], [60], t..=t);
     f["fingerprint"] = serde_json::json!([2]);
-    assert_eq!(vec![QueryStat { fingerprint: 2, ..s }], load(db, f, &[]).await?);
+    assert_eq!(vec![QueryStat { fingerprint: 2, ..s }], load(&pg, f, &[]).await?);
 
     // Delete returns the deleted chunks matching the filter; verify by comparing decompressed rows.
-    let before_delete = load(db, Filter::new([5], [60], t..=t), &[]).await?;
+    let before_delete = load(&pg, Filter::new([5], [60], t..=t), &[]).await?;
     assert_eq!(before_delete.len(), 2);
-    let deleted_chunks = CompressedQueryStats::delete(db, Filter::new([5], [60], t..=t), &[]).await?;
+    let deleted_chunks = pg.delete(&Filter::new([5], [60], t..=t)).await?;
     let mut deleted = Vec::new();
     for chunk in deleted_chunks {
         deleted.extend(chunk.decompress()?);
@@ -61,7 +67,7 @@ async fn test() -> anyhow::Result<()> {
     deleted.sort_by_key(|s| (s.fingerprint, s.collected_at));
     assert_eq!(deleted.len(), 2);
     assert_eq!(deleted, before_delete);
-    let after_delete = load(db, Filter::new([5], [60], t..=t), &[]).await?;
+    let after_delete = load(&pg, Filter::new([5], [60], t..=t), &[]).await?;
     assert_eq!(after_delete.len(), 0);
 
     Ok(())
@@ -72,6 +78,7 @@ async fn test() -> anyhow::Result<()> {
 #[serial_test::serial]
 async fn test_selective_field_loading() -> anyhow::Result<()> {
     let db = &super::DB_POOL.get().await?;
+    let pg = super::pg::<QueryStat>();
     let sql = "
         DROP TABLE IF EXISTS query_stats;
         CREATE TABLE query_stats (
@@ -88,10 +95,10 @@ async fn test_selective_field_loading() -> anyhow::Result<()> {
 
     let t = DateTime::from_timestamp_micros(Utc::now().timestamp_micros()).context("out of range")?;
     let s = QueryStat { database_id: 5, granularity: 60, collected_at: t, fingerprint: 42 };
-    CompressedQueryStats::store(db, vec![s]).await?;
+    pg.store(&QueryStat::write(vec![s])?).await?;
 
     // Load only fingerprint field
-    let chunks = CompressedQueryStats::load(db, Filter::new([5], [60], t..=t), &["fingerprint"]).await?;
+    let chunks = pg.load(&Filter::new([5], [60], t..=t), &["fingerprint"]).await?;
     assert_eq!(chunks.len(), 1);
     let chunk = &chunks[0];
 
@@ -108,7 +115,7 @@ async fn test_selective_field_loading() -> anyhow::Result<()> {
     assert_eq!(decompressed[0].fingerprint, 42);
 
     // Load with empty fields (all fields)
-    let chunks = CompressedQueryStats::load(db, Filter::new([5], [60], t..=t), &[]).await?;
+    let chunks = pg.load(&Filter::new([5], [60], t..=t), &[]).await?;
     assert_eq!(chunks.len(), 1);
     let decompressed = chunks[0].decompress()?;
     assert_eq!(decompressed[0].database_id, 5);
@@ -123,6 +130,7 @@ async fn test_selective_field_loading() -> anyhow::Result<()> {
 #[serial_test::serial]
 async fn test_filter_fields_auto_included() -> anyhow::Result<()> {
     let db = &super::DB_POOL.get().await?;
+    let pg = super::pg::<QueryStat>();
     let sql = "
         DROP TABLE IF EXISTS query_stats;
         CREATE TABLE query_stats (
@@ -138,19 +146,16 @@ async fn test_filter_fields_auto_included() -> anyhow::Result<()> {
     db.batch_execute(sql).await?;
 
     let t = DateTime::from_timestamp_micros(Utc::now().timestamp_micros()).context("out of range")?;
-    CompressedQueryStats::store(
-        db,
-        vec![
-            QueryStat { database_id: 5, granularity: 60, collected_at: t, fingerprint: 1 },
-            QueryStat { database_id: 5, granularity: 60, collected_at: t, fingerprint: 2 },
-        ],
-    )
+    pg.store(&QueryStat::write(vec![
+        QueryStat { database_id: 5, granularity: 60, collected_at: t, fingerprint: 1 },
+        QueryStat { database_id: 5, granularity: 60, collected_at: t, fingerprint: 2 },
+    ])?)
     .await?;
 
     // Filter on fingerprint but request no explicit fields - fingerprint should be auto-included
     let mut f = Filter::new([5], [60], t..=t);
     f["fingerprint"] = serde_json::json!([2]);
-    let chunks = CompressedQueryStats::load(db, f.clone(), &[]).await?;
+    let chunks = pg.load(&f, &[]).await?;
     assert_eq!(chunks.len(), 1);
 
     // Verify fingerprint field is in the resolved fields
@@ -169,15 +174,18 @@ async fn test_filter_fields_auto_included() -> anyhow::Result<()> {
 #[tokio::test]
 #[serial_test::serial]
 async fn test_no_timestamp_fields() -> anyhow::Result<()> {
-    #[pco_store::store(index = [database_id])]
-    #[derive(Clone, Debug, PartialEq)]
+    #[derive(Clone, Debug, PartialEq, PcoStore)]
+    #[pco_store(index = [database_id])]
     pub struct NoTsStat {
         pub database_id: i64,
         pub calls: i64,
         pub total_time: f64,
     }
 
+    type Filter = <NoTsStat as PcoPack>::Filter;
+
     let db = &super::DB_POOL.get().await?;
+    let pg = super::pg::<NoTsStat>();
     let sql = "
         DROP TABLE IF EXISTS no_ts_stats;
         CREATE TABLE no_ts_stats (
@@ -189,14 +197,14 @@ async fn test_no_timestamp_fields() -> anyhow::Result<()> {
     ";
     db.batch_execute(sql).await?;
 
-    CompressedNoTsStats::store(
-        db,
-        vec![NoTsStat { database_id: 1, calls: 10, total_time: 1.5 }, NoTsStat { database_id: 1, calls: 20, total_time: 2.5 }],
-    )
+    pg.store(&NoTsStat::write(vec![
+        NoTsStat { database_id: 1, calls: 10, total_time: 1.5 },
+        NoTsStat { database_id: 1, calls: 20, total_time: 2.5 },
+    ])?)
     .await?;
 
     // Load only calls field
-    let chunks = CompressedNoTsStats::load(db, Filter::new([1]), &["calls"]).await?;
+    let chunks = pg.load(&Filter::new([1]), &["calls"]).await?;
     assert_eq!(chunks.len(), 1);
     let decompressed = chunks[0].decompress()?;
     assert_eq!(decompressed.len(), 2);
@@ -204,7 +212,7 @@ async fn test_no_timestamp_fields() -> anyhow::Result<()> {
     assert_eq!(decompressed[1].calls, 20);
 
     // Load all fields
-    let chunks = CompressedNoTsStats::load(db, Filter::new([1]), &[]).await?;
+    let chunks = pg.load(&Filter::new([1]), &[]).await?;
     let decompressed = chunks[0].decompress()?;
     assert_eq!(decompressed[0].total_time, 1.5);
     assert_eq!(decompressed[1].total_time, 2.5);
@@ -212,9 +220,9 @@ async fn test_no_timestamp_fields() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn load(db: &deadpool_postgres::Client, filter: Filter, fields: &[&str]) -> anyhow::Result<Vec<QueryStat>> {
+async fn load(pg: &Arc<dyn Backend<QueryStat>>, filter: Filter, fields: &[&str]) -> anyhow::Result<Vec<QueryStat>> {
     let mut rows = Vec::new();
-    for chunk in CompressedQueryStats::load(db, filter, fields).await? {
+    for chunk in pg.load(&filter, fields).await? {
         rows.extend(chunk.decompress()?);
     }
     rows.sort_by_key(|s| (s.fingerprint, s.collected_at));

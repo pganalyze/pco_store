@@ -1,7 +1,13 @@
+#![cfg(feature = "postgres")]
+
 use ahash::AHashMap;
 use chrono::{DateTime, DurationRound, Utc};
+use pco_store::pco_pack::PcoPack;
+use pco_store::pg::Postgres;
+use pco_store::{Backend, PcoStore, pco_store};
 use std::collections::hash_map::Entry;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::SystemTime;
 
 mod chrono_tests;
@@ -22,11 +28,21 @@ pub static DB_POOL: std::sync::LazyLock<std::sync::Arc<deadpool_postgres::Pool>>
     deadpool_postgres::Pool::builder(mgr).build().unwrap().into()
 });
 
+/// The Postgres adapter for one model. The model type goes in once, here: the
+/// adapter then answers whole chunks, filters, and fields all pinned to it.
+/// These suites pin the COPY, SELECT, and DELETE shapes the derive generates.
+pub fn pg<M: pco_store::pco_pack::PcoPack + 'static>() -> Arc<dyn Backend<M>>
+where
+    Postgres: Backend<M>,
+{
+    Arc::new(Postgres::new(Arc::clone(&DB_POOL)))
+}
+
 #[tokio::test]
 #[serial_test::serial]
 async fn timestamp() {
-    #[derive(Clone, Debug, PartialEq)]
-    #[pco_store::store(timestamp = collected_at, index = [database_id])]
+    #[derive(Clone, Debug, PartialEq, PcoStore)]
+    #[pco_store(timestamp = collected_at, index = [database_id])]
     pub struct QueryStat {
         pub database_id: i64,
         pub collected_at: DateTime<Utc>,
@@ -35,11 +51,14 @@ async fn timestamp() {
         pub total_time: f64,
     }
 
+    type Filter = <QueryStat as PcoPack>::Filter;
+
     let database_id = 1;
     let start = DateTime::<Utc>::from(SystemTime::now() - std::time::Duration::from_secs(3600)).duration_trunc(chrono::Duration::hours(1)).unwrap();
     let end = start + chrono::Duration::seconds(3600);
 
     let db = &DB_POOL.get().await.unwrap();
+    let pg = pg::<QueryStat>();
     let sql = "
         DROP TABLE IF EXISTS query_stats;
         CREATE TABLE query_stats (
@@ -58,14 +77,14 @@ async fn timestamp() {
     // Write
     let collected_at = end - chrono::Duration::seconds(120);
     let stats = vec![QueryStat { database_id, collected_at, fingerprint: 1, calls: 1, total_time: 1.0 }];
-    CompressedQueryStats::store(db, stats).await.unwrap();
+    pg.store(&QueryStat::write(stats).unwrap()).await.unwrap();
     let collected_at = end - chrono::Duration::seconds(60);
     let stats = vec![QueryStat { database_id, collected_at, fingerprint: 1, calls: 1, total_time: 1.0 }];
-    CompressedQueryStats::store(db, stats).await.unwrap();
+    pg.store(&QueryStat::write(stats).unwrap()).await.unwrap();
 
     // Read
     let mut calls = 0;
-    for chunk in CompressedQueryStats::load(db, Filter::new([database_id], start..=end), &[]).await.unwrap() {
+    for chunk in pg.load(&Filter::new([database_id], start..=end), &[]).await.unwrap() {
         for stat in chunk.decompress().unwrap() {
             calls += stat.calls;
         }
@@ -74,12 +93,12 @@ async fn timestamp() {
 
     // Load before delete so we can compare against what delete returns
     let mut loaded = Vec::new();
-    for chunk in CompressedQueryStats::load(db, Filter::new([database_id], start..=end), &[]).await.unwrap() {
+    for chunk in pg.load(&Filter::new([database_id], start..=end), &[]).await.unwrap() {
         loaded.extend(chunk.decompress().unwrap());
     }
-    // Delete and re-store to improve compression (store_grouped removed; pco_pack handles chunking)
+    // Delete and re-store to improve compression (pco_pack handles chunking)
     assert_eq!(2, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
-    let deleted_chunks = CompressedQueryStats::delete(db, Filter::new([database_id], start..=end), &[]).await.unwrap();
+    let deleted_chunks = pg.delete(&Filter::new([database_id], start..=end)).await.unwrap();
     let mut deleted = Vec::new();
     for chunk in deleted_chunks {
         deleted.extend(chunk.decompress().unwrap());
@@ -91,9 +110,9 @@ async fn timestamp() {
     assert_eq!(deleted, loaded);
     assert_eq!(0, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
     // Re-store all at once (pco_pack handles chunking internally)
-    CompressedQueryStats::store(db, loaded.clone()).await.unwrap();
+    pg.store(&QueryStat::write(loaded.clone()).unwrap()).await.unwrap();
     assert_eq!(1, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
-    for chunk in CompressedQueryStats::load(db, Filter::new([database_id], start..=end), &[]).await.unwrap() {
+    for chunk in pg.load(&Filter::new([database_id], start..=end), &[]).await.unwrap() {
         loaded.extend(chunk.decompress().unwrap());
     }
     assert_eq!(loaded[0].collected_at, end - chrono::Duration::seconds(120));
@@ -101,19 +120,18 @@ async fn timestamp() {
 
     // The `load` WHERE query and in-memory timestamp filter work as expected
     let mut stat = QueryStat { database_id, collected_at: start, fingerprint: 1, calls: 1, total_time: 1.0 };
-    for e in 0..3 {
-        println!("{e}");
+    for _ in 0..3 {
         let mut stats = Vec::new();
         for _ in 1..=10 {
             stat.collected_at += chrono::Duration::seconds(60);
             stats.push(stat.clone());
         }
-        CompressedQueryStats::store(db, stats).await.unwrap();
+        pg.store(&QueryStat::write(stats).unwrap()).await.unwrap();
     }
     let start = start + chrono::Duration::seconds(3 * 60); // minute 3, skipping the first 2 minutes in the group
     let end = start + chrono::Duration::seconds(23 * 60); // minute 26, skipping the last 4 minutes in the group
     let mut loaded = Vec::new();
-    for chunk in CompressedQueryStats::load(db, Filter::new([database_id], start..=end), &[]).await.unwrap() {
+    for chunk in pg.load(&Filter::new([database_id], start..=end), &[]).await.unwrap() {
         loaded.extend(chunk.decompress().unwrap());
     }
     assert_eq!(loaded.len(), 24);
@@ -130,8 +148,8 @@ async fn timestamp() {
     DB_POOL.manager().statement_caches.clear();
     {
         #[allow(dead_code)]
-        #[derive(Clone)]
-        #[pco_store::store(timestamp = collected_at, index = [database_id])]
+        #[derive(Clone, PcoStore)]
+        #[pco_store(timestamp = collected_at, index = [database_id])]
         pub struct QueryStat {
             database_id: i64,
             collected_at: DateTime<Utc>,
@@ -141,11 +159,14 @@ async fn timestamp() {
             new_col: i32,
         }
 
+        type Filter = <QueryStat as PcoPack>::Filter;
+
         let end = end + chrono::Duration::seconds(5 * 60); // minute 31
+        let pg = crate::pg::<QueryStat>();
         let stat = QueryStat { database_id, collected_at: end, fingerprint: 1, calls: 1, total_time: 1.0, new_col: 1 };
-        CompressedQueryStats::store(db, vec![stat]).await.unwrap();
+        pg.store(&QueryStat::write(vec![stat]).unwrap()).await.unwrap();
         let mut loaded = Vec::new();
-        for chunk in CompressedQueryStats::load(db, Filter::new([database_id], start..=end), &[]).await.unwrap() {
+        for chunk in pg.load(&Filter::new([database_id], start..=end), &[]).await.unwrap() {
             loaded.extend(chunk.decompress().unwrap());
         }
         assert_eq!(loaded.len(), 29);
@@ -166,8 +187,8 @@ async fn timestamp() {
 #[tokio::test]
 #[serial_test::serial]
 async fn delete_returns_all_rows_in_chunk() {
-    #[pco_store::store(timestamp = collected_at, index = [database_id])]
-    #[derive(Clone, Debug, PartialEq)]
+    #[derive(Clone, Debug, PartialEq, PcoStore)]
+    #[pco_store(timestamp = collected_at, index = [database_id])]
     pub struct QueryStat {
         pub database_id: i64,
         pub collected_at: DateTime<Utc>,
@@ -175,10 +196,13 @@ async fn delete_returns_all_rows_in_chunk() {
         pub calls: i64,
     }
 
+    type Filter = <QueryStat as PcoPack>::Filter;
+
     let database_id = 1;
     let start = DateTime::<Utc>::from(SystemTime::now() - std::time::Duration::from_secs(3600)).duration_trunc(chrono::Duration::hours(1)).unwrap();
     let end = start + chrono::Duration::hours(1);
     let db = &DB_POOL.get().await.unwrap();
+    let pg = pg::<QueryStat>();
     let sql = "
         DROP TABLE IF EXISTS query_stats;
         CREATE TABLE query_stats (
@@ -197,15 +221,11 @@ async fn delete_returns_all_rows_in_chunk() {
         QueryStat { database_id, collected_at: start, fingerprint: 1, calls: 1 },
         QueryStat { database_id, collected_at: end, fingerprint: 2, calls: 2 },
     ];
-    CompressedQueryStats::store(db, stats.clone()).await.unwrap();
+    pg.store(&QueryStat::write(stats.clone()).unwrap()).await.unwrap();
 
     // The filter range only covers the second row, but the chunk overlaps it and is deleted in full
-    let deleted: Vec<QueryStat> = CompressedQueryStats::delete(db, Filter::new([database_id], end..=end), &[])
-        .await
-        .unwrap()
-        .into_iter()
-        .flat_map(|chunk| chunk.decompress().unwrap())
-        .collect();
+    let deleted: Vec<QueryStat> =
+        pg.delete(&Filter::new([database_id], end..=end)).await.unwrap().into_iter().flat_map(|chunk| chunk.decompress().unwrap()).collect();
     assert_eq!(deleted, stats);
     assert_eq!(0, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
 }
@@ -215,8 +235,8 @@ async fn delete_returns_all_rows_in_chunk() {
 #[tokio::test]
 #[serial_test::serial]
 async fn aggregate() {
-    #[pco_store::store(timestamp = collected_at, index = [database_id, granularity])]
-    #[derive(Clone)]
+    #[derive(Clone, PcoStore)]
+    #[pco_store(timestamp = collected_at, index = [database_id, granularity])]
     pub struct QueryStat {
         pub database_id: i64,
         pub granularity: i32,
@@ -226,11 +246,14 @@ async fn aggregate() {
         pub total_time: f64,
     }
 
+    type Filter = <QueryStat as PcoPack>::Filter;
+
     let database_id = 1;
     let start = DateTime::<Utc>::from(SystemTime::now() - std::time::Duration::from_secs(3600)).duration_trunc(chrono::Duration::hours(1)).unwrap();
     let end = start + chrono::Duration::seconds(3600);
 
     let db = &DB_POOL.get().await.unwrap();
+    let pg = pg::<QueryStat>();
     let sql = "
         DROP TABLE IF EXISTS query_stats;
         CREATE TABLE query_stats (
@@ -253,14 +276,14 @@ async fn aggregate() {
     let granularity = 60;
     let collected_at = start + chrono::Duration::seconds(10);
     let stats = vec![QueryStat { database_id, granularity, collected_at, fingerprint: 1, calls: 1, total_time: 1.0 }];
-    CompressedQueryStats::store(db, stats).await.unwrap();
+    pg.store(&QueryStat::write(stats).unwrap()).await.unwrap();
     let collected_at = start + chrono::Duration::seconds(20);
     let stats = vec![QueryStat { database_id, granularity, collected_at, fingerprint: 1, calls: 1, total_time: 1.0 }];
-    CompressedQueryStats::store(db, stats).await.unwrap();
+    pg.store(&QueryStat::write(stats).unwrap()).await.unwrap();
 
     // Read
     let mut calls = 0;
-    for chunk in CompressedQueryStats::load(db, Filter::new([database_id], [granularity], start..=end), &[]).await.unwrap() {
+    for chunk in pg.load(&Filter::new([database_id], [granularity], start..=end), &[]).await.unwrap() {
         for stat in chunk.decompress().unwrap() {
             calls += stat.calls;
         }
@@ -272,7 +295,7 @@ async fn aggregate() {
     let mut stats: AHashMap<_, QueryStat> = AHashMap::new();
     let start = DateTime::<Utc>::from(SystemTime::now() - std::time::Duration::from_secs(3600)).duration_trunc(chrono::Duration::hours(1)).unwrap();
     let end = start + chrono::Duration::seconds(3600);
-    for chunk in CompressedQueryStats::load(db, Filter::new([database_id], [granularity], start..=end), &[]).await.unwrap() {
+    for chunk in pg.load(&Filter::new([database_id], [granularity], start..=end), &[]).await.unwrap() {
         for stat in chunk.decompress().unwrap() {
             match stats.entry((stat.database_id, stat.fingerprint)) {
                 Entry::Occupied(mut entry) => {
@@ -291,12 +314,12 @@ async fn aggregate() {
     }
     let stats: Vec<QueryStat> = stats.into_values().collect();
     assert_eq!(2, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
-    CompressedQueryStats::store(db, stats).await.unwrap();
+    pg.store(&QueryStat::write(stats).unwrap()).await.unwrap();
     assert_eq!(3, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
 
     // Load hourly aggregates using typed filter field for granularity
     let mut loaded = Vec::new();
-    for chunk in CompressedQueryStats::load(db, Filter::new([database_id], [3600], start..=end), &[]).await.unwrap() {
+    for chunk in pg.load(&Filter::new([database_id], [3600], start..=end), &[]).await.unwrap() {
         loaded.extend(chunk.decompress().unwrap());
     }
     assert_eq!(loaded.len(), 1);
@@ -307,7 +330,8 @@ async fn aggregate() {
 // Read-only scan counters (sequential + index scans) for a relation. pg_stat_force_next_flush
 // makes this backend's pending counters visible immediately (PG16+); on older versions counters
 // only reach shared memory on the ~500 ms stats timer, which callers compensate for by retrying.
-async fn stat_scans(db: &impl std::ops::Deref<Target = deadpool_postgres::ClientWrapper>, rel: &str) -> i64 {
+async fn stat_scans(pool: &deadpool_postgres::Pool, rel: &str) -> i64 {
+    let db = pool.get().await.unwrap();
     let _ = db.execute("SELECT pg_stat_force_next_flush()", &[]).await;
     db.query_one("SELECT seq_scan + idx_scan FROM pg_stat_user_tables WHERE relname = $1", &[&rel]).await.unwrap().get(0)
 }
@@ -321,8 +345,8 @@ async fn stat_scans(db: &impl std::ops::Deref<Target = deadpool_postgres::Client
 #[tokio::test]
 #[serial_test::serial]
 async fn partition_pruning() {
-    #[pco_store::store(timestamp = collected_at, index = [database_id, granularity])]
-    #[derive(Clone)]
+    #[derive(Clone, Debug, PartialEq, PcoStore)]
+    #[pco_store(timestamp = collected_at, index = [database_id, granularity])]
     pub struct PruneStat {
         pub database_id: i64,
         pub granularity: i32,
@@ -331,11 +355,23 @@ async fn partition_pruning() {
         pub calls: i64,
     }
 
+    type Filter = <PruneStat as PcoPack>::Filter;
+
     let database_id = 1;
     let start = DateTime::<Utc>::from(SystemTime::now() - std::time::Duration::from_secs(3600)).duration_trunc(chrono::Duration::hours(1)).unwrap();
     let end = start + chrono::Duration::seconds(3600);
 
-    let db = &DB_POOL.get().await.unwrap();
+    // plan_cache_mode is a session setting, and the pooled backend checks out whichever client
+    // it likes, so forcing the generic plan needs a dedicated single-connection pool: every
+    // operation below then lands on the one client that carries the setting.
+    let mgr = deadpool_postgres::Manager::from_config(
+        tokio_postgres::Config::from_str(&std::env::var("DATABASE_URL").unwrap_or("postgresql://localhost:5432/postgres".to_string())).unwrap(),
+        tokio_postgres::NoTls,
+        deadpool_postgres::ManagerConfig { recycling_method: deadpool_postgres::RecyclingMethod::Fast },
+    );
+    let pool: Arc<deadpool_postgres::Pool> = deadpool_postgres::Pool::builder(mgr).max_size(1).build().unwrap().into();
+    let pg: Arc<dyn Backend<PruneStat>> = Arc::new(Postgres::new(Arc::clone(&pool)));
+
     let sql = "
         DROP TABLE IF EXISTS prune_stats;
         CREATE TABLE prune_stats (
@@ -351,32 +387,23 @@ async fn partition_pruning() {
         CREATE TABLE prune_stats_1min PARTITION OF prune_stats FOR VALUES IN (60);
         CREATE TABLE prune_stats_1hour PARTITION OF prune_stats FOR VALUES IN (3600);
     ";
-    db.batch_execute(sql).await.unwrap();
+    pool.get().await.unwrap().batch_execute(sql).await.unwrap();
 
-    CompressedPruneStats::store(
-        db,
-        vec![PruneStat { database_id, granularity: 60, collected_at: start + chrono::Duration::seconds(10), fingerprint: 1, calls: 1 }],
-    )
-    .await
-    .unwrap();
-    CompressedPruneStats::store(
-        db,
-        vec![PruneStat { database_id, granularity: 3600, collected_at: start + chrono::Duration::seconds(20), fingerprint: 1, calls: 5 }],
-    )
-    .await
-    .unwrap();
-    db.batch_execute("ANALYZE prune_stats").await.unwrap();
-
-    db.batch_execute("SET plan_cache_mode = force_generic_plan").await.unwrap();
+    let stats = vec![PruneStat { database_id, granularity: 60, collected_at: start + chrono::Duration::seconds(10), fingerprint: 1, calls: 1 }];
+    pg.store(&PruneStat::write(stats).unwrap()).await.unwrap();
+    let stats = vec![PruneStat { database_id, granularity: 3600, collected_at: start + chrono::Duration::seconds(20), fingerprint: 1, calls: 5 }];
+    pg.store(&PruneStat::write(stats).unwrap()).await.unwrap();
+    pool.get().await.unwrap().batch_execute("ANALYZE prune_stats").await.unwrap();
+    pool.get().await.unwrap().batch_execute("SET plan_cache_mode = force_generic_plan").await.unwrap();
 
     // Baseline after a canary full scan: once the canary's scans are visible, everything the setup
     // did (index builds, ANALYZE sampling) is visible too, since stats writes flush all pending
     // counters at once. This keeps the delta strictly attributable to the loads below.
-    db.execute("SELECT count(*) FROM prune_stats", &[]).await.unwrap();
+    pool.get().await.unwrap().execute("SELECT count(*) FROM prune_stats", &[]).await.unwrap();
     let (mut base_min, mut base_hour) = (0, 0);
     for _ in 0..100 {
-        base_min = stat_scans(db, "prune_stats_1min").await;
-        base_hour = stat_scans(db, "prune_stats_1hour").await;
+        base_min = stat_scans(&pool, "prune_stats_1min").await;
+        base_hour = stat_scans(&pool, "prune_stats_1hour").await;
         if base_min > 0 && base_hour > 0 {
             break;
         }
@@ -387,7 +414,7 @@ async fn partition_pruning() {
     // The statement text is stable across iterations, so this reuses the cached prepared statement.
     let mut calls = 0;
     for _ in 0..3 {
-        for chunk in CompressedPruneStats::load(db, Filter::new([database_id], [3600], start..=end), &[]).await.unwrap() {
+        for chunk in pg.load(&Filter::new([database_id], [3600], start..=end), &[]).await.unwrap() {
             for stat in chunk.decompress().unwrap() {
                 calls += stat.calls;
             }
@@ -399,40 +426,41 @@ async fn partition_pruning() {
     // the non-matching partition means the executor pruned it rather than scanning it.
     let mut hour_scans = base_hour;
     for _ in 0..100 {
-        hour_scans = stat_scans(db, "prune_stats_1hour").await;
+        hour_scans = stat_scans(&pool, "prune_stats_1hour").await;
         if hour_scans > base_hour {
             break;
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
     assert!(hour_scans > base_hour, "expected scans of the matching partition to appear in stats");
-    assert_eq!(stat_scans(db, "prune_stats_1min").await, base_min, "the non-matching partition was scanned: pruning did not happen");
+    assert_eq!(stat_scans(&pool, "prune_stats_1min").await, base_min, "the non-matching partition was scanned: pruning did not happen");
 
     // A multi-value inclusion must still load both partitions.
     let mut calls = 0;
-    for chunk in CompressedPruneStats::load(db, Filter::new([database_id], [60, 3600], start..=end), &[]).await.unwrap() {
+    for chunk in pg.load(&Filter::new([database_id], [60, 3600], start..=end), &[]).await.unwrap() {
         for stat in chunk.decompress().unwrap() {
             calls += stat.calls;
         }
     }
     assert_eq!(calls, 6);
-
-    db.batch_execute("RESET plan_cache_mode").await.unwrap();
 }
 
 #[tokio::test]
 #[serial_test::serial]
 async fn no_timestamp() {
-    #[pco_store::store(index = [database_id])]
-    #[derive(Clone, Debug, PartialEq)]
+    #[derive(Clone, Debug, PartialEq, PcoStore)]
+    #[pco_store(index = [database_id])]
     pub struct QueryStat {
         pub database_id: i64,
         pub calls: i64,
         pub total_time: f64,
     }
 
+    type Filter = <QueryStat as PcoPack>::Filter;
+
     let database_id = 1;
     let db = &DB_POOL.get().await.unwrap();
+    let pg = pg::<QueryStat>();
     let sql = "
         DROP TABLE IF EXISTS query_stats;
         CREATE TABLE query_stats (
@@ -446,13 +474,13 @@ async fn no_timestamp() {
 
     // Write
     let stats = vec![QueryStat { database_id, calls: 1, total_time: 1.0 }];
-    CompressedQueryStats::store(db, stats).await.unwrap();
+    pg.store(&QueryStat::write(stats).unwrap()).await.unwrap();
     let stats = vec![QueryStat { database_id, calls: 2, total_time: 2.0 }];
-    CompressedQueryStats::store(db, stats).await.unwrap();
+    pg.store(&QueryStat::write(stats).unwrap()).await.unwrap();
 
     // Read
     let mut calls = 0;
-    for chunk in CompressedQueryStats::load(db, Filter::new([database_id]), &[]).await.unwrap() {
+    for chunk in pg.load(&Filter::new([database_id]), &[]).await.unwrap() {
         for stat in chunk.decompress().unwrap() {
             calls += stat.calls;
         }
@@ -461,12 +489,12 @@ async fn no_timestamp() {
 
     // Load before delete so we can compare against what delete returns
     let mut loaded = Vec::new();
-    for chunk in CompressedQueryStats::load(db, Filter::new([database_id]), &[]).await.unwrap() {
+    for chunk in pg.load(&Filter::new([database_id]), &[]).await.unwrap() {
         loaded.extend(chunk.decompress().unwrap());
     }
     // Delete and re-store
     assert_eq!(2, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
-    let deleted_chunks = CompressedQueryStats::delete(db, Filter::new([database_id]), &[]).await.unwrap();
+    let deleted_chunks = pg.delete(&Filter::new([database_id])).await.unwrap();
     let mut deleted = Vec::new();
     for chunk in deleted_chunks {
         deleted.extend(chunk.decompress().unwrap());
@@ -477,9 +505,9 @@ async fn no_timestamp() {
     deleted.sort_by_key(|s| s.calls);
     assert_eq!(deleted, loaded);
     assert_eq!(0, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
-    CompressedQueryStats::store(db, loaded.clone()).await.unwrap();
+    pg.store(&QueryStat::write(loaded.clone()).unwrap()).await.unwrap();
     assert_eq!(1, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
-    for chunk in CompressedQueryStats::load(db, Filter::new([database_id]), &[]).await.unwrap() {
+    for chunk in pg.load(&Filter::new([database_id]), &[]).await.unwrap() {
         loaded.extend(chunk.decompress().unwrap());
     }
     assert_eq!(loaded[0].calls, 1);
@@ -489,16 +517,19 @@ async fn no_timestamp() {
 #[tokio::test]
 #[serial_test::serial]
 async fn no_index() {
-    #[pco_store::store]
-    #[derive(Clone, Debug, PartialEq)]
+    #[derive(Clone, Debug, PartialEq, PcoStore)]
+    #[pco_store(name = query_stats)]
     pub struct QueryStat {
         pub database_id: i64,
         pub calls: i64,
         pub total_time: f64,
     }
 
+    type Filter = <QueryStat as PcoPack>::Filter;
+
     let database_id = 1;
     let db = &DB_POOL.get().await.unwrap();
+    let pg = pg::<QueryStat>();
     let sql = "
         DROP TABLE IF EXISTS query_stats;
         CREATE TABLE query_stats (
@@ -511,13 +542,13 @@ async fn no_index() {
 
     // Write
     let stats = vec![QueryStat { database_id, calls: 1, total_time: 1.0 }];
-    CompressedQueryStats::store(db, stats).await.unwrap();
+    pg.store(&QueryStat::write(stats).unwrap()).await.unwrap();
     let stats = vec![QueryStat { database_id, calls: 2, total_time: 2.0 }];
-    CompressedQueryStats::store(db, stats).await.unwrap();
+    pg.store(&QueryStat::write(stats).unwrap()).await.unwrap();
 
     // Read
     let mut calls = 0;
-    for chunk in CompressedQueryStats::load(db, Filter::default(), &[]).await.unwrap() {
+    for chunk in pg.load(&Filter::default(), &[]).await.unwrap() {
         for stat in chunk.decompress().unwrap() {
             calls += stat.calls;
         }
@@ -526,12 +557,12 @@ async fn no_index() {
 
     // Load before delete so we can compare against what delete returns
     let mut loaded = Vec::new();
-    for chunk in CompressedQueryStats::load(db, Filter::default(), &[]).await.unwrap() {
+    for chunk in pg.load(&Filter::default(), &[]).await.unwrap() {
         loaded.extend(chunk.decompress().unwrap());
     }
     // Delete and re-store
     assert_eq!(2, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
-    let deleted_chunks = CompressedQueryStats::delete(db, Filter::default(), &[]).await.unwrap();
+    let deleted_chunks = pg.delete(&Filter::default()).await.unwrap();
     let mut deleted = Vec::new();
     for chunk in deleted_chunks {
         deleted.extend(chunk.decompress().unwrap());
@@ -542,9 +573,9 @@ async fn no_index() {
     deleted.sort_by_key(|s| s.calls);
     assert_eq!(deleted, loaded);
     assert_eq!(0, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
-    CompressedQueryStats::store(db, loaded.clone()).await.unwrap();
+    pg.store(&QueryStat::write(loaded.clone()).unwrap()).await.unwrap();
     assert_eq!(1, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
-    for chunk in CompressedQueryStats::load(db, Filter::default(), &[]).await.unwrap() {
+    for chunk in pg.load(&Filter::default(), &[]).await.unwrap() {
         loaded.extend(chunk.decompress().unwrap());
     }
     assert_eq!(loaded[0].calls, 1);
@@ -554,16 +585,19 @@ async fn no_index() {
 #[tokio::test]
 #[serial_test::serial]
 async fn table_name() {
-    #[pco_store::store(table_name = other)]
-    #[derive(Clone)]
+    #[derive(Clone, PcoStore)]
+    #[pco_store(name = other)]
     pub struct QueryStat {
         pub database_id: i64,
         pub calls: i64,
         pub total_time: f64,
     }
 
+    type Filter = <QueryStat as PcoPack>::Filter;
+
     let database_id = 1;
     let db = &DB_POOL.get().await.unwrap();
+    let pg = pg::<QueryStat>();
     let sql = "
         DROP TABLE IF EXISTS other;
         CREATE TABLE other (
@@ -576,13 +610,13 @@ async fn table_name() {
 
     // Write
     let stats = vec![QueryStat { database_id, calls: 1, total_time: 1.0 }];
-    CompressedQueryStats::store(db, stats).await.unwrap();
+    pg.store(&QueryStat::write(stats).unwrap()).await.unwrap();
     let stats = vec![QueryStat { database_id, calls: 2, total_time: 2.0 }];
-    CompressedQueryStats::store(db, stats).await.unwrap();
+    pg.store(&QueryStat::write(stats).unwrap()).await.unwrap();
 
     // Read
     let mut calls = 0;
-    for chunk in CompressedQueryStats::load(db, Filter::default(), &[]).await.unwrap() {
+    for chunk in pg.load(&Filter::default(), &[]).await.unwrap() {
         for stat in chunk.decompress().unwrap() {
             calls += stat.calls;
         }
@@ -593,16 +627,19 @@ async fn table_name() {
 #[tokio::test]
 #[serial_test::serial]
 async fn float_round() {
-    #[pco_store::store(index = [database_id], float_round = 2)]
-    #[derive(Clone)]
+    #[derive(Clone, PcoStore)]
+    #[pco_store(index = [database_id], float_round = 2)]
     pub struct QueryStat {
         pub database_id: i64,
         pub calls: i64,
         pub total_time: f64,
     }
 
+    type Filter = <QueryStat as PcoPack>::Filter;
+
     let database_id = 1;
     let db = &DB_POOL.get().await.unwrap();
+    let pg = pg::<QueryStat>();
     let sql = "
         DROP TABLE IF EXISTS query_stats;
         CREATE TABLE query_stats (
@@ -615,13 +652,13 @@ async fn float_round() {
 
     // Write
     let stats = vec![QueryStat { database_id, calls: 1, total_time: 1.2345 }];
-    CompressedQueryStats::store(db, stats).await.unwrap();
+    pg.store(&QueryStat::write(stats).unwrap()).await.unwrap();
     let stats = vec![QueryStat { database_id, calls: 2, total_time: 1.2345 }];
-    CompressedQueryStats::store(db, stats).await.unwrap();
+    pg.store(&QueryStat::write(stats).unwrap()).await.unwrap();
 
     // Read
     let mut total_time = 0.0;
-    for chunk in CompressedQueryStats::load(db, Filter::new([database_id]), &[]).await.unwrap() {
+    for chunk in pg.load(&Filter::new([database_id]), &[]).await.unwrap() {
         for stat in chunk.decompress().unwrap() {
             total_time += stat.total_time;
         }
@@ -630,16 +667,19 @@ async fn float_round() {
 
     DB_POOL.manager().statement_caches.clear();
     {
-        #[pco_store::store(index = [database_id], float_round = 3)]
-        #[derive(Clone)]
+        #[derive(Clone, PcoStore)]
+        #[pco_store(index = [database_id], float_round = 3)]
         pub struct QueryStat {
             pub database_id: i64,
             pub calls: i64,
             pub total_time: f64,
         }
 
+        type Filter = <QueryStat as PcoPack>::Filter;
+
         let database_id = 1;
         let db = &DB_POOL.get().await.unwrap();
+        let pg = crate::pg::<QueryStat>();
         let sql = "
             DROP TABLE IF EXISTS query_stats;
             CREATE TABLE query_stats (
@@ -652,13 +692,13 @@ async fn float_round() {
 
         // Write
         let stats = vec![QueryStat { database_id, calls: 1, total_time: 1.2345 }];
-        CompressedQueryStats::store(db, stats).await.unwrap();
+        pg.store(&QueryStat::write(stats).unwrap()).await.unwrap();
         let stats = vec![QueryStat { database_id, calls: 2, total_time: 1.2345 }];
-        CompressedQueryStats::store(db, stats).await.unwrap();
+        pg.store(&QueryStat::write(stats).unwrap()).await.unwrap();
 
         // Read
         let mut total_time = 0.0;
-        for chunk in CompressedQueryStats::load(db, Filter::new([database_id]), &[]).await.unwrap() {
+        for chunk in pg.load(&Filter::new([database_id]), &[]).await.unwrap() {
             for stat in chunk.decompress().unwrap() {
                 total_time += stat.total_time;
             }
@@ -671,16 +711,19 @@ async fn float_round() {
 #[tokio::test]
 #[serial_test::serial]
 async fn boolean() {
-    #[pco_store::store(index = [database_id])]
-    #[derive(Clone, Debug, PartialEq)]
+    #[derive(Clone, Debug, PartialEq, PcoStore)]
+    #[pco_store(index = [database_id])]
     pub struct QueryStat {
         pub database_id: i64,
         pub calls: i64,
         pub toplevel: bool,
     }
 
+    type Filter = <QueryStat as PcoPack>::Filter;
+
     let database_id = 1;
     let db = &DB_POOL.get().await.unwrap();
+    let pg = pg::<QueryStat>();
     let sql = "
         DROP TABLE IF EXISTS query_stats;
         CREATE TABLE query_stats (
@@ -693,11 +736,11 @@ async fn boolean() {
 
     // Write
     let stats = vec![QueryStat { database_id, calls: 1, toplevel: true }, QueryStat { database_id, calls: 2, toplevel: false }];
-    CompressedQueryStats::store(db, stats.clone()).await.unwrap();
+    pg.store(&QueryStat::write(stats.clone()).unwrap()).await.unwrap();
 
     // Read
     let mut loaded = Vec::new();
-    for chunk in CompressedQueryStats::load(db, Filter::new([database_id]), &[]).await.unwrap() {
+    for chunk in pg.load(&Filter::new([database_id]), &[]).await.unwrap() {
         loaded.extend(chunk.decompress().unwrap());
     }
     assert_eq!(loaded, stats);

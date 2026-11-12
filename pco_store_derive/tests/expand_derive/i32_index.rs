@@ -1,4 +1,5 @@
-#[pco_store::store(timestamp = collected_at, index = [database_id, granularity])]
+#[derive(PcoStore)]
+#[pco_store(timestamp = collected_at, index = [database_id, granularity])]
 pub struct QueryStat {
     pub database_id: i64,
     pub granularity: i32,
