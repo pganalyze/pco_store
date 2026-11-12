@@ -55,12 +55,20 @@ impl CompressedQueryStats {
                     params.push(v);
                 }
                 pco_pack::I64Filter::Inclusion(vals) => {
-                    if !vals.is_empty() {
-                        where_clauses
-                            .push(
-                                format!("{} = ANY(${})", "database_id", params.len() + 1),
-                            );
-                        params.push(vals);
+                    match vals.as_slice() {
+                        [] => {}
+                        [v] => {
+                            where_clauses
+                                .push(format!("{} = ${}", "database_id", params.len() + 1));
+                            params.push(v);
+                        }
+                        _ => {
+                            where_clauses
+                                .push(
+                                    format!("{} = ANY(${})", "database_id", params.len() + 1),
+                                );
+                            params.push(vals);
+                        }
                     }
                 }
                 pco_pack::I64Filter::Range { start, end } => {
@@ -154,12 +162,20 @@ impl CompressedQueryStats {
                     params.push(v);
                 }
                 pco_pack::I64Filter::Inclusion(vals) => {
-                    if !vals.is_empty() {
-                        where_clauses
-                            .push(
-                                format!("{} = ANY(${})", "database_id", params.len() + 1),
-                            );
-                        params.push(vals);
+                    match vals.as_slice() {
+                        [] => {}
+                        [v] => {
+                            where_clauses
+                                .push(format!("{} = ${}", "database_id", params.len() + 1));
+                            params.push(v);
+                        }
+                        _ => {
+                            where_clauses
+                                .push(
+                                    format!("{} = ANY(${})", "database_id", params.len() + 1),
+                                );
+                            params.push(vals);
+                        }
                     }
                 }
                 pco_pack::I64Filter::Range { start, end } => {

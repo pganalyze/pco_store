@@ -61,10 +61,18 @@ impl CompressedSerdes {
                     params.push(v);
                 }
                 pco_pack::UuidFilter::Inclusion(vals) => {
-                    if !vals.is_empty() {
-                        where_clauses
-                            .push(format!("{} = ANY(${})", "id", params.len() + 1));
-                        params.push(vals);
+                    match vals.as_slice() {
+                        [] => {}
+                        [v] => {
+                            where_clauses
+                                .push(format!("{} = ${}", "id", params.len() + 1));
+                            params.push(v);
+                        }
+                        _ => {
+                            where_clauses
+                                .push(format!("{} = ANY(${})", "id", params.len() + 1));
+                            params.push(vals);
+                        }
                     }
                 }
             }
@@ -76,10 +84,18 @@ impl CompressedSerdes {
                     params.push(v);
                 }
                 pco_pack::StringFilter::Inclusion(vals) => {
-                    if !vals.is_empty() {
-                        where_clauses
-                            .push(format!("{} = ANY(${})", "name", params.len() + 1));
-                        params.push(vals);
+                    match vals.as_slice() {
+                        [] => {}
+                        [v] => {
+                            where_clauses
+                                .push(format!("{} = ${}", "name", params.len() + 1));
+                            params.push(v);
+                        }
+                        _ => {
+                            where_clauses
+                                .push(format!("{} = ANY(${})", "name", params.len() + 1));
+                            params.push(vals);
+                        }
                     }
                 }
             }
@@ -268,10 +284,18 @@ impl CompressedSerdes {
                     params.push(v);
                 }
                 pco_pack::UuidFilter::Inclusion(vals) => {
-                    if !vals.is_empty() {
-                        where_clauses
-                            .push(format!("{} = ANY(${})", "id", params.len() + 1));
-                        params.push(vals);
+                    match vals.as_slice() {
+                        [] => {}
+                        [v] => {
+                            where_clauses
+                                .push(format!("{} = ${}", "id", params.len() + 1));
+                            params.push(v);
+                        }
+                        _ => {
+                            where_clauses
+                                .push(format!("{} = ANY(${})", "id", params.len() + 1));
+                            params.push(vals);
+                        }
                     }
                 }
             }
@@ -283,10 +307,18 @@ impl CompressedSerdes {
                     params.push(v);
                 }
                 pco_pack::StringFilter::Inclusion(vals) => {
-                    if !vals.is_empty() {
-                        where_clauses
-                            .push(format!("{} = ANY(${})", "name", params.len() + 1));
-                        params.push(vals);
+                    match vals.as_slice() {
+                        [] => {}
+                        [v] => {
+                            where_clauses
+                                .push(format!("{} = ${}", "name", params.len() + 1));
+                            params.push(v);
+                        }
+                        _ => {
+                            where_clauses
+                                .push(format!("{} = ANY(${})", "name", params.len() + 1));
+                            params.push(vals);
+                        }
                     }
                 }
             }

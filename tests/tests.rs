@@ -304,6 +304,122 @@ async fn aggregate() {
     assert_eq!(loaded[0].calls, 2);
 }
 
+// Read-only scan counters (sequential + index scans) for a relation. pg_stat_force_next_flush
+// makes this backend's pending counters visible immediately (PG16+); on older versions counters
+// only reach shared memory on the ~500 ms stats timer, which callers compensate for by retrying.
+async fn stat_scans(db: &impl std::ops::Deref<Target = deadpool_postgres::ClientWrapper>, rel: &str) -> i64 {
+    let _ = db.execute("SELECT pg_stat_force_next_flush()", &[]).await;
+    db.query_one("SELECT seq_scan + idx_scan FROM pg_stat_user_tables WHERE relname = $1", &[&rel]).await.unwrap().get(0)
+}
+
+// Verifies the generated query is pruned by Postgres even when its plan is generic, for the
+// common single-value filter case: the generated SQL must render a single-value inclusion as
+// equality, because `col = ANY($n)` is only prunable for a Const or ArrayExpr array operand
+// (partprune.c), so a generic plan would scan every partition. A cached prepared statement in
+// application code becomes generic on the 6th execution anyway, so this is the situation
+// production queries actually end up in.
+#[tokio::test]
+#[serial_test::serial]
+async fn partition_pruning() {
+    #[pco_store::store(timestamp = collected_at, index = [database_id, granularity])]
+    #[derive(Clone)]
+    pub struct PruneStat {
+        pub database_id: i64,
+        pub granularity: i32,
+        pub collected_at: DateTime<Utc>,
+        pub fingerprint: i64,
+        pub calls: i64,
+    }
+
+    let database_id = 1;
+    let start = DateTime::<Utc>::from(SystemTime::now() - std::time::Duration::from_secs(3600)).duration_trunc(chrono::Duration::hours(1)).unwrap();
+    let end = start + chrono::Duration::seconds(3600);
+
+    let db = &DB_POOL.get().await.unwrap();
+    let sql = "
+        DROP TABLE IF EXISTS prune_stats;
+        CREATE TABLE prune_stats (
+            database_id bigint NOT NULL,
+            granularity int NOT NULL,
+            start_at timestamptz NOT NULL,
+            end_at timestamptz NOT NULL,
+            collected_at bytea STORAGE EXTERNAL NOT NULL,
+            fingerprint bytea STORAGE EXTERNAL NOT NULL,
+            calls bytea STORAGE EXTERNAL NOT NULL
+        ) PARTITION BY LIST (granularity);
+        CREATE INDEX ON prune_stats USING btree (database_id, end_at, start_at, granularity);
+        CREATE TABLE prune_stats_1min PARTITION OF prune_stats FOR VALUES IN (60);
+        CREATE TABLE prune_stats_1hour PARTITION OF prune_stats FOR VALUES IN (3600);
+    ";
+    db.batch_execute(sql).await.unwrap();
+
+    CompressedPruneStats::store(
+        db,
+        vec![PruneStat { database_id, granularity: 60, collected_at: start + chrono::Duration::seconds(10), fingerprint: 1, calls: 1 }],
+    )
+    .await
+    .unwrap();
+    CompressedPruneStats::store(
+        db,
+        vec![PruneStat { database_id, granularity: 3600, collected_at: start + chrono::Duration::seconds(20), fingerprint: 1, calls: 5 }],
+    )
+    .await
+    .unwrap();
+    db.batch_execute("ANALYZE prune_stats").await.unwrap();
+
+    db.batch_execute("SET plan_cache_mode = force_generic_plan").await.unwrap();
+
+    // Baseline after a canary full scan: once the canary's scans are visible, everything the setup
+    // did (index builds, ANALYZE sampling) is visible too, since stats writes flush all pending
+    // counters at once. This keeps the delta strictly attributable to the loads below.
+    db.execute("SELECT count(*) FROM prune_stats", &[]).await.unwrap();
+    let (mut base_min, mut base_hour) = (0, 0);
+    for _ in 0..100 {
+        base_min = stat_scans(db, "prune_stats_1min").await;
+        base_hour = stat_scans(db, "prune_stats_1hour").await;
+        if base_min > 0 && base_hour > 0 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(base_min > 0 && base_hour > 0, "canary scans never became visible in stats");
+
+    // The statement text is stable across iterations, so this reuses the cached prepared statement.
+    let mut calls = 0;
+    for _ in 0..3 {
+        for chunk in CompressedPruneStats::load(db, Filter::new([database_id], [3600], start..=end), &[]).await.unwrap() {
+            for stat in chunk.decompress().unwrap() {
+                calls += stat.calls;
+            }
+        }
+    }
+    assert_eq!(calls, 15);
+
+    // Once the matching partition's scans become visible, stats have flushed, and a zero delta on
+    // the non-matching partition means the executor pruned it rather than scanning it.
+    let mut hour_scans = base_hour;
+    for _ in 0..100 {
+        hour_scans = stat_scans(db, "prune_stats_1hour").await;
+        if hour_scans > base_hour {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert!(hour_scans > base_hour, "expected scans of the matching partition to appear in stats");
+    assert_eq!(stat_scans(db, "prune_stats_1min").await, base_min, "the non-matching partition was scanned: pruning did not happen");
+
+    // A multi-value inclusion must still load both partitions.
+    let mut calls = 0;
+    for chunk in CompressedPruneStats::load(db, Filter::new([database_id], [60, 3600], start..=end), &[]).await.unwrap() {
+        for stat in chunk.decompress().unwrap() {
+            calls += stat.calls;
+        }
+    }
+    assert_eq!(calls, 6);
+
+    db.batch_execute("RESET plan_cache_mode").await.unwrap();
+}
+
 #[tokio::test]
 #[serial_test::serial]
 async fn no_timestamp() {
