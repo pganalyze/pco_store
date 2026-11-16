@@ -18,12 +18,18 @@ use std::ops::Deref;
 use std::pin::Pin;
 
 use anyhow::Result;
+use futures::TryStreamExt;
 use pco_pack::PcoPack;
 
 /// A future returned by a backend method. Boxed so `Backend` stays object
 /// safe, which is what lets a store hold a runtime-picked `dyn Backend<M>`
 ///. Callsites that want no boxing take `impl Backend<M>` generics.
 pub type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
+
+/// A stream returned by a backend method. Boxed for the same reason as
+/// [`BoxFuture`]. Consuming it needs only the `TryStreamExt` re-export at the
+/// crate root (`try_next` to pull chunk by chunk, `try_collect` for a `Vec`).
+pub type BoxStream<'a, T> = Pin<Box<dyn futures::stream::Stream<Item = T> + Send + 'a>>;
 
 /// What an adapter honestly promises. Callers consult this and
 /// never learn a cloud's atomicity by reading Postgres's, because the trait
@@ -99,17 +105,23 @@ where
 pub type Filter<M> = <M as pco_pack::PcoPack>::Filter;
 
 /// One storage adapter for one model. `store` persists whole
-/// chunks; `load` narrows by the model's `index` fields and timestamp bounds,
-/// reads survivors whole, and returns them with the filter and fields applied;
-/// `delete` returns the whole chunks it removed for lossless compaction.
+/// chunks; `load` narrows by the model's `index` fields and timestamp bounds
+/// and streams the survivors with the filter and fields applied; `delete`
+/// returns the whole chunks it removed for lossless compaction.
 /// The shared lifetime `'a` spans the adapter and its arguments, which is
-/// what the boxed futures borrow while they run.
+/// what the boxed futures and streams borrow while they run.
 pub trait Backend<M: PcoPack>: Send + Sync {
     /// Persist these chunks whole.
     fn store<'a>(&'a self, chunks: &'a [M::Chunk]) -> BoxFuture<'a, Result<()>>;
 
-    /// Load the chunks whose key and bounds match `filter`, keeping `fields`.
-    fn load<'a>(&'a self, filter: &'a M::Filter, fields: &'a [&str]) -> BoxFuture<'a, Result<Vec<Chunk<M>>>>;
+    /// Stream the chunks whose key and bounds match `filter`, keeping `fields`.
+    /// Each adapter chooses its own request shape behind this one signature:
+    /// the filesystem adapter lists names once and answers each chunk as its
+    /// file is read; Postgres runs one narrowed SELECT through `query_raw`,
+    /// so rows stream as the server produces them; a future object adapter
+    /// lists one key prefix per index tuple and pipelines the resulting
+    /// point GETs. Stopping the stream early stops paying for it.
+    fn load<'a>(&'a self, filter: &'a M::Filter, fields: &'a [&str]) -> BoxStream<'a, Result<Chunk<M>>>;
 
     /// Delete the chunks matching `filter`, returning each whole chunk with an
     /// empty filter so a re-store of its rows loses nothing.
@@ -139,9 +151,9 @@ pub trait PcoStore: PcoPack {
         })
     }
 
-    /// Loads the chunks matching `filter`, keeping `fields`, through any
+    /// Streams the chunks matching `filter`, keeping `fields`, through any
     /// backend.
-    fn load<'a, B>(backend: &'a B, filter: &'a Self::Filter, fields: &'a [&str]) -> BoxFuture<'a, Result<Vec<Chunk<Self>>>>
+    fn load<'a, B>(backend: &'a B, filter: &'a Self::Filter, fields: &'a [&str]) -> BoxStream<'a, Result<Chunk<Self>>>
     where
         B: Backend<Self> + ?Sized,
     {
@@ -157,12 +169,17 @@ pub trait PcoStore: PcoPack {
         backend.delete(filter)
     }
 
-    /// Loads the chunks matching `filter`, then streams every row through
-    /// `consumer` in one pass without materializing row structs. One
-    /// consumer spans the whole load, so a `fold!` accumulator sums across
-    /// chunks and decodes only the columns it reads. Named to match
-    /// `PcoPack::for_each`: pco_store wraps pco_pack (see the crate docs),
-    /// so `PcoPack` stays out of scope and the model path stays unambiguous.
+    /// Streams the chunks matching `filter` and folds each one through
+    /// `consumer` as it loads, without materializing row structs or a chunk
+    /// vector: the first fold begins at the first chunk. One consumer spans
+    /// the whole load, so a `fold!` accumulator sums across chunks and decodes
+    /// only the columns it reads. Feeding pco_pack's public per-chunk fold
+    /// engine (`fold_value`) chunk by chunk is exactly what one call over a
+    /// whole slice expands to: `Consumer` cursors are forward-only per chunk
+    /// and `fold!` keeps its state in the consumer, so no fold state lives
+    /// between chunks. Named to match `PcoPack::for_each`: pco_store wraps
+    /// pco_pack (see the crate docs), so `PcoPack` stays out of scope and the
+    /// model path stays unambiguous.
     fn for_each<'a, B, C>(backend: &'a B, filter: &'a Self::Filter, fields: &'a [&str], consumer: C) -> BoxFuture<'a, Result<()>>
     where
         Self: 'a,
@@ -172,9 +189,13 @@ pub trait PcoStore: PcoPack {
         <Self::Filter as TryInto<pco_pack::serde_json::Value>>::Error: Into<anyhow::Error>,
     {
         Box::pin(async move {
-            let loaded = backend.load(filter, fields).await?;
-            let chunks: Vec<Self::Chunk> = loaded.into_iter().map(|chunk| chunk.chunk).collect();
-            <Self as PcoPack>::for_each(&chunks, filter.clone(), fields, consumer)
+            let filter_json: pco_pack::serde_json::Value = filter.clone().try_into().map_err(Into::into)?;
+            let mut consumer = consumer;
+            let mut stream = backend.load(filter, fields);
+            while let Some(chunk) = stream.try_next().await? {
+                <Self as PcoPack>::fold_value(std::slice::from_ref(&chunk.chunk), &filter_json, fields, &mut consumer)?;
+            }
+            Ok(())
         })
     }
 }
@@ -196,4 +217,12 @@ pub fn decode_chunk<M: PcoPack>(bytes: &[u8]) -> Result<M::Chunk> {
     let mut chunks = M::from_bytes(bytes)?;
     anyhow::ensure!(chunks.len() == 1, "expected one chunk in these bytes, found {}", chunks.len());
     Ok(chunks.pop().expect("length checked"))
+}
+
+/// A stream answering with one error. A stream-returning method that fails
+/// while planning (a filter that will not convert, a field that will not
+/// resolve) reports it as the stream's only item instead of a signature that
+/// is both `Result` and `Stream`.
+pub fn stream_err<M: PcoPack>(err: anyhow::Error) -> BoxStream<'static, Result<Chunk<M>>> {
+    Box::pin(futures::stream::once(async move { Err::<Chunk<M>, _>(err) }))
 }

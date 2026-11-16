@@ -6,7 +6,7 @@ use std::fs;
 
 use chrono::{DateTime, TimeZone, Utc};
 use pco_store::fs::Fs;
-use pco_store::{Backend, PcoStore, pco_store};
+use pco_store::{Backend, PcoStore, TryStreamExt, pco_store};
 
 #[derive(Clone, Debug, PartialEq, PcoStore)]
 #[pco_store(timestamp = collected_at, index = [database_id])]
@@ -62,13 +62,19 @@ async fn fs_store_load_narrow_and_delete() {
 
     // Narrowing by key answers at readdir: only database_id 1's file is read.
     let window = (base - chrono::Duration::hours(1))..=(base + chrono::Duration::hours(1));
-    let chunks = FsStat::load(&store, &Filter::new([1i64], window.clone()), &[]).await.unwrap();
+    let chunks = FsStat::load(&store, &Filter::new([1i64], window.clone()), &[]).try_collect::<Vec<_>>().await.unwrap();
     assert_eq!(chunks.len(), 1);
     assert_eq!(rows(&chunks).iter().map(|r| r.calls).sum::<i64>(), 3);
 
-    // The full window reads both files.
-    let all = FsStat::load(&store, &Filter::new([1i64, 2i64], window.clone()), &[]).await.unwrap();
-    assert_eq!(rows(&all).iter().map(|r| r.calls).sum::<i64>(), 8);
+    // The load streams: the first chunk is pulled before the remaining files
+    // are read, and draining the rest answers the same data a collect would.
+    let streaming = Filter::new([1i64, 2i64], window.clone());
+    let mut stream = FsStat::load(&store, &streaming, &[]);
+    let mut both = vec![stream.try_next().await.unwrap().unwrap()];
+    while let Some(chunk) = stream.try_next().await.unwrap() {
+        both.push(chunk);
+    }
+    assert_eq!(rows(&both).iter().map(|r| r.calls).sum::<i64>(), 8);
 
     // Re-storing identical chunk bytes overwrites its own name: no duplicates.
     let first_file = dir.path().join(file_names(dir.path()).first().unwrap().clone());
@@ -92,7 +98,7 @@ async fn fs_store_load_narrow_and_delete() {
     assert_eq!(file_names(dir.path()).len(), 1);
 
     // With delete, the surviving file is database_id 1's chunk, intact.
-    let survivors = FsStat::load(&store, &Filter::new([1i64], window), &[]).await.unwrap();
+    let survivors = FsStat::load(&store, &Filter::new([1i64], window), &[]).try_collect::<Vec<_>>().await.unwrap();
     assert_eq!(rows(&survivors).iter().map(|r| r.calls).sum::<i64>(), 3);
 
     assert!(store.capabilities().rename);
@@ -116,7 +122,7 @@ async fn chunks_deref_and_for_each() {
     .unwrap();
     FsStat::store(&store, vec![FsStat { database_id: 2, collected_at: base, calls: 7 }]).await.unwrap();
 
-    let chunks = FsStat::load(&store, &Filter::new([1i64], window.clone()), &[]).await.unwrap();
+    let chunks = FsStat::load(&store, &Filter::new([1i64], window.clone()), &[]).try_collect::<Vec<_>>().await.unwrap();
     assert_eq!(chunks.len(), 1);
 
     // Deref reaches the stored chunk, so index columns and the timestamp

@@ -1,6 +1,6 @@
 use chrono::{DateTime, NaiveDate, Utc};
 use pco_store::pco_pack::PcoPack;
-use pco_store::{PcoStore, pco_store};
+use pco_store::{PcoStore, TryStreamExt, pco_store};
 
 fn ymd_hms_micros(year: i32, month: u32, day: u32, hour: u32, min: u32, sec: u32, micros: u32) -> Option<DateTime<Utc>> {
     Some(NaiveDate::from_ymd_opt(year, month, day)?.and_hms_micro_opt(hour, min, sec, micros)?.and_utc())
@@ -50,7 +50,7 @@ async fn chrono_timestamp() {
     // Read back all rows in range
     {
         let mut actual = Vec::new();
-        for chunk in pg.load(&Filter::new([database_id], start..=end), &[]).await.unwrap() {
+        for chunk in pg.load(&Filter::new([database_id], start..=end), &[]).try_collect::<Vec<_>>().await.unwrap() {
             actual.extend(chunk.decompress().unwrap());
         }
         assert_eq!(actual.len(), 2);
@@ -65,7 +65,7 @@ async fn chrono_timestamp() {
     // Read back all three rows
     {
         let mut actual = Vec::new();
-        for chunk in pg.load(&Filter::new([database_id], start..=end), &[]).await.unwrap() {
+        for chunk in pg.load(&Filter::new([database_id], start..=end), &[]).try_collect::<Vec<_>>().await.unwrap() {
             actual.extend(chunk.decompress().unwrap());
         }
         assert_eq!(actual.len(), 3);

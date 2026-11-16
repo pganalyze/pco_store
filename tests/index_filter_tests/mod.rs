@@ -4,7 +4,7 @@
 
 use chrono::{DateTime, Utc};
 use pco_store::pco_pack::PcoPack;
-use pco_store::{Backend, PcoStore, pco_store};
+use pco_store::{Backend, PcoStore, TryStreamExt, pco_store};
 use std::sync::Arc;
 
 /// Struct with multiple index fields of different types to exercise all filter variant handlers.
@@ -261,7 +261,7 @@ async fn store_rows_at_times(pg: &Arc<dyn Backend<Metric>>) -> anyhow::Result<()
 
 async fn load_all(pg: &Arc<dyn Backend<Metric>>, filter: Filter) -> anyhow::Result<Vec<Metric>> {
     let mut results = Vec::new();
-    for chunk in pg.load(&filter, &[]).await? {
+    for chunk in pg.load(&filter, &[]).try_collect::<Vec<_>>().await? {
         results.extend(chunk.decompress()?);
     }
     Ok(results)

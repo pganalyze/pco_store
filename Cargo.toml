@@ -16,6 +16,9 @@ repository = "https://github.com/pganalyze/pco_store"
 
 [dependencies]
 anyhow = "1.0"
+# load answers a Stream, so the runtime names the Stream combinator.
+async-stream = "0.3"
+futures = "0.3"
 pco_pack = { git = "https://github.com/pganalyze/pco_pack" }
 # default-features stay off: pco_store's own features below pick which
 # backend impls the derive emits, so the dep spec never re-enables defaults.

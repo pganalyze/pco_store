@@ -2,7 +2,7 @@ use ahash::AHashMap;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
 use pco_store::pg::Postgres;
-use pco_store::{PcoStore, pco_store};
+use pco_store::{PcoStore, TryStreamExt, pco_store};
 use peak_alloc::PeakAlloc;
 use std::str::FromStr;
 use std::time::{Duration, Instant};
@@ -155,7 +155,7 @@ pub async fn load() -> Result<Duration> {
     let mut stats = Vec::new();
     let filter = Filter::new(database_ids, DateTime::<Utc>::UNIX_EPOCH..=Utc::now());
     let start = Instant::now();
-    for chunk in QueryStat::load(db, &filter, &[]).await? {
+    for chunk in QueryStat::load(db, &filter, &[]).try_collect::<Vec<_>>().await? {
         stats.extend(chunk.decompress()?);
     }
     return Ok(start.elapsed());
@@ -167,7 +167,7 @@ pub async fn reduce() -> Result<Duration> {
     let mut stats: AHashMap<(i64, i64, i64), QueryStat> = AHashMap::new();
     let filter = Filter::new(database_ids, DateTime::<Utc>::UNIX_EPOCH..=Utc::now());
     let start = Instant::now();
-    for chunk in QueryStat::load(db, &filter, &[]).await? {
+    for chunk in QueryStat::load(db, &filter, &[]).try_collect::<Vec<_>>().await? {
         for stat in chunk.decompress()? {
             let key = (stat.database_id, stat.fingerprint, stat.postgres_role_id);
             let entry = stats.entry(key).or_default();
@@ -195,7 +195,7 @@ pub async fn filter() -> Result<Duration> {
     filter.fingerprint = Some((200).into());
     let start = Instant::now();
     let mut count = 0;
-    for chunk in QueryStat::load(&pg, &filter, &[]).await? {
+    for chunk in QueryStat::load(&pg, &filter, &[]).try_collect::<Vec<_>>().await? {
         count += chunk.decompress()?.len();
     }
     assert_eq!(count, 200);
