@@ -32,7 +32,15 @@ zstd = "0.13"
 [dev-dependencies]
 chrono = { version = "0.4", features = ["serde"] }
 dotenvy = "0.15"
+markdown-tables = "0.1"
+# prod_stream talks to RDS endpoints, which need TLS: MakeTlsConnector
+# implements tokio-postgres's connect trait over native-tls.
+native-tls = "0.2"
+# The read-strategy benchmarks use pco_pack directly, so nothing in
+# pco_store's own stack colors the measurements.
+pco_pack = { git = "https://github.com/pganalyze/pco_pack" }
 peak_alloc = "0.2"
+postgres-native-tls = "0.5"
 prettyplease = "0.2"
 serial_test = "3.2"
 tokio = { version = "1.43", features = ["full"] }
@@ -53,4 +61,16 @@ harness = false
 
 [[bench]]
 name = "synthetic"
+harness = false
+
+# Read-performance diagnostics: wall times rather than criterion statistics.
+[[bench]]
+name = "blob_stream"
+harness = false
+
+# A diagnostic against a live production database, not a regression
+# benchmark: it reports wall times for the read strategies over a
+# user-selected window.
+[[bench]]
+name = "prod_stream"
 harness = false
