@@ -58,6 +58,12 @@ tokio-postgres = { version = "0.7", features = ["with-chrono-0_4", "with-uuid-1"
 uuid = { version = "1.23", features = ["serde"] }
 zstd = "0.13"
 
+# Development-only override while parallel prepared chunks land upstream (see
+# docs/parallel-prepared-chunks-status.md): compile the local pco_pack clone.
+# Drop this once the git dependency below is refreshed past the merge.
+[patch."https://github.com/pganalyze/pco_pack"]
+pco_pack = { path = "../pco_pack" }
+
 [[bench]]
 name = "bucket_size"
 harness = false

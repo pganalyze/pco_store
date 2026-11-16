@@ -55,6 +55,10 @@ async fn main() -> Result<()> {
     println!("decompressed after {:.1?} ({:.1?} in pco_store)", start.elapsed(), pco_store_duration);
     println!("peak memory usage: {:.0?}MB", PEAK_ALLOC.peak_usage_as_mb());
 
+    println!();
+    println!("=== fold");
+    fold().await?;
+
     Ok(())
 }
 
@@ -200,4 +204,53 @@ pub async fn filter() -> Result<Duration> {
     }
     assert_eq!(count, 200);
     return Ok(start.elapsed());
+}
+
+/// The same `fold!` projection through serial `for_each` and
+/// `for_each_parallel`, so one process holds both sides of the comparison
+/// against the same pco_pack: serial is the before column, each worker
+/// count an after. The projection spans six payload columns to keep the
+/// run decode-bound, which is what the pipeline exists for.
+async fn fold() -> Result<()> {
+    let db = &DB_POOL.get().await.unwrap();
+    let database_ids: Vec<i64> = db.query_one("SELECT array_agg(DISTINCT database_id) FROM synthetic_pco_stores", &[]).await?.get(0);
+    let filter = Filter::new(database_ids, DateTime::<Utc>::UNIX_EPOCH..=Utc::now());
+
+    PEAK_ALLOC.reset_peak_usage();
+    let (serial_ms, serial_sums) = fold_run(db, &filter, None).await?;
+    println!("serial for_each: {:.1?} (peak {}MB)", serial_ms, PEAK_ALLOC.peak_usage_as_mb());
+    for workers in [2, 4, 8] {
+        PEAK_ALLOC.reset_peak_usage();
+        let (ms, sums) = fold_run(db, &filter, Some(std::num::NonZeroUsize::new(workers).unwrap())).await?;
+        assert_eq!(sums, serial_sums, "parallel fold must equal the serial fold at {workers} workers");
+        println!("for_each_parallel({workers}): {:.1?} ({}x, peak {}MB)", ms, serial_ms.as_secs_f64() / ms.as_secs_f64(), PEAK_ALLOC.peak_usage_as_mb());
+    }
+    Ok(())
+}
+
+/// Folds every column the pipeline should decode and returns wall time plus
+/// the six sums, so callers can assert serial and parallel agreement. Order
+/// is load order in both paths, so even the float sums agree exactly.
+async fn fold_run(db: &deadpool_postgres::Object, filter: &Filter, workers: Option<std::num::NonZeroUsize>) -> Result<(Duration, (i64, i64, f64, f64, i64, i64))> {
+    let mut calls_sum = 0i64;
+    let mut rows_sum = 0i64;
+    let mut total_time_sum = 0f64;
+    let mut io_time_sum = 0f64;
+    let mut hits_sum = 0i64;
+    let mut reads_sum = 0i64;
+    let start = Instant::now();
+    let consumer = pco_store::fold!(QueryStat, |calls: i64, rows: i64, total_time: f64, io_time: f64, shared_blks_hit: i64, shared_blks_read: i64| {
+        calls_sum += calls;
+        rows_sum += rows;
+        total_time_sum += total_time;
+        io_time_sum += io_time;
+        hits_sum += shared_blks_hit;
+        reads_sum += shared_blks_read;
+    });
+    match workers {
+        None => QueryStat::for_each(db, filter, &[], consumer).await?,
+        Some(workers) => QueryStat::for_each_parallel(db, filter, &[], consumer, workers).await?,
+    }
+    let ms = start.elapsed();
+    Ok((ms, (calls_sum, rows_sum, total_time_sum, io_time_sum, hits_sum, reads_sum)))
 }

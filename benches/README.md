@@ -30,14 +30,20 @@ Now with the optimized data model, this benchmark compares the performance of us
 
 ## `synthetic.rs`
 
-Unlike the previous benchmarks, this generates synthetic data and measures the time and peak memory usage of each operation.
+Unlike the previous benchmarks, this generates synthetic data and measures the time and peak memory usage of each operation. The final fold section runs one decode-bound `fold!` projection through `for_each` and then through `for_each_parallel` at 2, 4, and 8 worker threads, asserting every variant sums to the same values; the peak rises with the worker count because the pipeline window holds about `workers + 1` decoded chunks while decoding.
 
-| Operation    | Time   | Peak memory |
-| ------------ | ------ | ----------- |
-| store        | 983 ms | 2304 MB     |
-| load         | 395 ms | 7 MB        |
-| reduce       | 468 ms | 26 MB       |
-| filter       | 2 ms   | 3 MB        |
+| Operation                        | Time    | Peak memory |
+| -------------------------------- | ------- | ----------- |
+| store                            | 1.0 s   | 2304 MB     |
+| load                             | 612 ms  | 1767 MB     |
+| reduce                           | 617 ms  | 34 MB       |
+| filter                           | 2 ms    | 9 MB        |
+| fold (serial `for_each`)         | 145 ms  | 6 MB        |
+| fold (`for_each_parallel`, 2)    | 80 ms   | 17 MB       |
+| fold (`for_each_parallel`, 4)    | 76 ms   | 28 MB       |
+| fold (`for_each_parallel`, 8)    | 78 ms   | 49 MB       |
+
+The fold speedup plateaus past 2 workers because row delivery, the container copy, and the fold walk all stay serial on the fold thread; only decode leaves, and decode is about two thirds of the serial fold.
 
 # Setup
 

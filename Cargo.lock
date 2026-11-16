@@ -697,7 +697,6 @@ dependencies = [
 [[package]]
 name = "pco_pack"
 version = "0.1.0"
-source = "git+https://github.com/pganalyze/pco_pack#b91d219127cb58485823d83724e1c7d242b6a225"
 dependencies = [
  "ahash",
  "anyhow",
@@ -719,7 +718,6 @@ dependencies = [
 [[package]]
 name = "pco_pack_derive"
 version = "0.1.0"
-source = "git+https://github.com/pganalyze/pco_pack#b91d219127cb58485823d83724e1c7d242b6a225"
 dependencies = [
  "proc-macro2",
  "quote",
