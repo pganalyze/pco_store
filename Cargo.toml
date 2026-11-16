@@ -46,6 +46,7 @@ chrono = { version = "0.4", features = ["serde"] }
 deadpool-postgres = "0.14"
 dotenvy = "0.15"
 futures = "0.3"
+markdown-tables = "0.1"
 peak_alloc = "0.2"
 pco = "1.0"
 serde = { version = "1.0", features = ["derive"] }

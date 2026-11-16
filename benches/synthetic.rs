@@ -1,6 +1,7 @@
 use ahash::AHashMap;
 use anyhow::Result;
 use chrono::{DateTime, Utc};
+use markdown_tables::MarkdownTableRow;
 use pco_store::pg::Postgres;
 use pco_store::{PcoStore, TryStreamExt, pco_store};
 use peak_alloc::PeakAlloc;
@@ -23,43 +24,71 @@ static DB_POOL: std::sync::LazyLock<std::sync::Arc<deadpool_postgres::Pool>> = s
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
+    let mut rows = Vec::new();
     println!("== pco_store");
+
+    println!();
     println!("=== store");
     PEAK_ALLOC.reset_peak_usage();
-    let start = Instant::now();
-    let pco_store_duration = store().await?;
-    println!("compressed after {:.1?} ({:.1?} in pco_store)", start.elapsed(), pco_store_duration);
-    println!("peak memory usage: {:.0?}MB", PEAK_ALLOC.peak_usage_as_mb());
+    let duration = store().await?;
+    rows.push(BenchRow::new("store", duration));
 
     println!();
-    println!("=== load");
+    println!("=== load (100% of rows)");
     PEAK_ALLOC.reset_peak_usage();
-    let start = Instant::now();
-    let pco_store_duration = load().await?;
-    println!("decompressed after {:.1?} ({:.1?} in pco_store)", start.elapsed(), pco_store_duration);
-    println!("peak memory usage: {:.0?}MB", PEAK_ALLOC.peak_usage_as_mb());
+    let duration = load().await?;
+    rows.push(BenchRow::new("load (100% of rows)", duration));
 
     println!();
-    println!("=== reduce");
+    println!("=== reduce (100% of rows)");
     PEAK_ALLOC.reset_peak_usage();
-    let start = Instant::now();
-    let pco_store_duration = reduce().await?;
-    println!("decompressed after {:.1?} ({:.1?} in pco_store)", start.elapsed(), pco_store_duration);
-    println!("peak memory usage: {:.0?}MB", PEAK_ALLOC.peak_usage_as_mb());
+    let duration = reduce().await?;
+    rows.push(BenchRow::new("reduce (100% of rows)", duration));
 
     println!();
-    println!("=== filter");
+    println!("=== filter ({} databases + fingerprint range, {:.3}% of rows)", FILTER_DATABASE_COUNT, filter_percent());
     PEAK_ALLOC.reset_peak_usage();
-    let start = Instant::now();
-    let pco_store_duration = filter().await?;
-    println!("decompressed after {:.1?} ({:.1?} in pco_store)", start.elapsed(), pco_store_duration);
-    println!("peak memory usage: {:.0?}MB", PEAK_ALLOC.peak_usage_as_mb());
+    let duration = filter().await?;
+    rows.push(BenchRow::new(format!("filter ({} databases + fingerprint range, {:.3}%)", FILTER_DATABASE_COUNT, filter_percent()), duration));
 
     println!();
-    println!("=== fold");
-    fold().await?;
+    println!("=== fold ({:.3}% of rows)", filter_percent());
+    fold(&mut rows).await?;
+
+    println!();
+    print!("{}", markdown_tables::as_table(&rows));
 
     Ok(())
+}
+
+/// One rendered scenario: time inside pco_store and peak allocator usage
+/// when the scenario finished. The whole run prints as one markdown table
+/// at the end, which is what benches/README.md records.
+struct BenchRow {
+    operation: String,
+    time: String,
+    peak: String,
+}
+
+impl BenchRow {
+    fn new(operation: impl Into<String>, duration: Duration) -> Self {
+        let time = if duration.as_secs_f64() >= 1.0 {
+            format!("{:.1} s", duration.as_secs_f64())
+        } else {
+            format!("{:.1} ms", duration.as_secs_f64() * 1000.0)
+        };
+        Self { operation: operation.into(), time, peak: format!("{:.0} MB", PEAK_ALLOC.peak_usage_as_mb()) }
+    }
+}
+
+impl MarkdownTableRow for BenchRow {
+    fn column_names() -> Vec<&'static str> {
+        vec!["Operation", "Time", "Peak memory"]
+    }
+
+    fn column_values(&self) -> Vec<String> {
+        vec![self.operation.clone(), self.time.clone(), self.peak.clone()]
+    }
 }
 
 #[derive(Clone, PcoStore)]
@@ -79,6 +108,34 @@ pub struct QueryStat {
 }
 
 type Filter = pco_store::Filter<QueryStat>;
+
+/// Synthetic data scale: 1M rows per database is four 262,144-row chunks per
+/// key, so every read scenario reads many chunks per key, and multi-value
+/// index filters take the `= ANY($n)` path a real workload takes.
+const DATABASE_COUNT: usize = 100;
+const ROWS_PER_DATABASE: usize = 1_000_000;
+/// The `filter` scenario (and the fold comparison, which shares its filter)
+/// reads three databases' chunks and keeps 16 fingerprint values in 500,
+/// which lands just under 0.1% of rows matched.
+const FILTER_DATABASE_COUNT: usize = 3;
+const FINGERPRINT_MODULUS: usize = 500;
+const FINGERPRINT_MATCH_COUNT: usize = 16;
+
+/// The ids and fingerprints the filter and fold scenarios share, so the fold
+/// comparison runs against the same selective query the filter scenario
+/// prices.
+fn match_filter() -> Filter {
+    let mut filter = Filter::new(vec![50i64, 51, 52], DateTime::<Utc>::UNIX_EPOCH..=Utc::now());
+    filter.fingerprint = Some((200..=215).into());
+    filter
+}
+
+fn filter_percent() -> f64 {
+    FILTER_DATABASE_COUNT as f64 * ROWS_PER_DATABASE as f64 * FINGERPRINT_MATCH_COUNT as f64
+        / FINGERPRINT_MODULUS as f64
+        / (DATABASE_COUNT * ROWS_PER_DATABASE) as f64
+        * 100.0
+}
 
 fn pg() -> Postgres {
     Postgres::new(DB_POOL.clone())
@@ -128,8 +185,8 @@ pub async fn store() -> Result<Duration> {
     db.batch_execute(sql).await?;
 
     let mut stats = Vec::new();
-    for db_id in 0..100 {
-        for i in 0..100_000 {
+    for db_id in 0..DATABASE_COUNT as i64 {
+        for i in 0..ROWS_PER_DATABASE as i64 {
             stats.push(QueryStat {
                 database_id: db_id,
                 collected_at: Utc::now(),
@@ -192,38 +249,41 @@ pub async fn reduce() -> Result<Duration> {
     return Ok(start.elapsed());
 }
 
-// Loads a single fingerprint for a single database
+// Three databases and a 16-value fingerprint range: the multi-value
+// inclusion emits `database_id = ANY($n)`, so the read takes the
+// array-parameter path over several chunks per key, and the fingerprint
+// range drops all but a tenth of one percent of rows inside each chunk.
 pub async fn filter() -> Result<Duration> {
     let pg = pg();
-    let mut filter = Filter::new(50, DateTime::<Utc>::UNIX_EPOCH..=Utc::now());
-    filter.fingerprint = Some((200).into());
+    let filter = match_filter();
     let start = Instant::now();
     let mut count = 0;
     for chunk in QueryStat::load(&pg, &filter, &[]).try_collect::<Vec<_>>().await? {
         count += chunk.decompress()?.len();
     }
-    assert_eq!(count, 200);
+    assert_eq!(count, FILTER_DATABASE_COUNT * ROWS_PER_DATABASE * FINGERPRINT_MATCH_COUNT / FINGERPRINT_MODULUS);
     return Ok(start.elapsed());
 }
 
 /// The same `fold!` projection through serial `for_each` and
-/// `for_each_parallel`, so one process holds both sides of the comparison
-/// against the same pco_pack: serial is the before column, each worker
-/// count an after. The projection spans six payload columns to keep the
-/// run decode-bound, which is what the pipeline exists for.
-async fn fold() -> Result<()> {
+/// `for_each_parallel` over the filter scenario's selective query, so one
+/// process holds both sides of the comparison against the same pco_pack:
+/// serial is the before column, each worker count an after. The projection
+/// spans six payload columns of the rows that survive the filter.
+async fn fold(rows: &mut Vec<BenchRow>) -> Result<()> {
     let db = &DB_POOL.get().await.unwrap();
-    let database_ids: Vec<i64> = db.query_one("SELECT array_agg(DISTINCT database_id) FROM synthetic_pco_stores", &[]).await?.get(0);
-    let filter = Filter::new(database_ids, DateTime::<Utc>::UNIX_EPOCH..=Utc::now());
+    let filter = match_filter();
 
     PEAK_ALLOC.reset_peak_usage();
     let (serial_ms, serial_sums) = fold_run(db, &filter, None).await?;
-    println!("serial for_each: {:.1?} (peak {}MB)", serial_ms, PEAK_ALLOC.peak_usage_as_mb());
-    for workers in [2, 4, 8] {
+    println!("serial for_each: {:.1?}", serial_ms);
+    rows.push(BenchRow::new(format!("fold ({:.3}% of rows, serial)", filter_percent()), serial_ms));
+    for workers in [2, 4] {
         PEAK_ALLOC.reset_peak_usage();
         let (ms, sums) = fold_run(db, &filter, Some(std::num::NonZeroUsize::new(workers).unwrap())).await?;
         assert_eq!(sums, serial_sums, "parallel fold must equal the serial fold at {workers} workers");
-        println!("for_each_parallel({workers}): {:.1?} ({}x, peak {}MB)", ms, serial_ms.as_secs_f64() / ms.as_secs_f64(), PEAK_ALLOC.peak_usage_as_mb());
+        println!("for_each_parallel({workers}): {:.1?} ({}x)", ms, serial_ms.as_secs_f64() / ms.as_secs_f64());
+        rows.push(BenchRow::new(format!("fold (`for_each_parallel`, {workers})"), ms));
     }
     Ok(())
 }
@@ -231,7 +291,9 @@ async fn fold() -> Result<()> {
 /// Folds every column the pipeline should decode and returns wall time plus
 /// the six sums, so callers can assert serial and parallel agreement. Order
 /// is load order in both paths, so even the float sums agree exactly.
-async fn fold_run(db: &deadpool_postgres::Object, filter: &Filter, workers: Option<std::num::NonZeroUsize>) -> Result<(Duration, (i64, i64, f64, f64, i64, i64))> {
+async fn fold_run(
+    db: &deadpool_postgres::Object, filter: &Filter, workers: Option<std::num::NonZeroUsize>,
+) -> Result<(Duration, (i64, i64, f64, f64, i64, i64))> {
     let mut calls_sum = 0i64;
     let mut rows_sum = 0i64;
     let mut total_time_sum = 0f64;
@@ -239,14 +301,15 @@ async fn fold_run(db: &deadpool_postgres::Object, filter: &Filter, workers: Opti
     let mut hits_sum = 0i64;
     let mut reads_sum = 0i64;
     let start = Instant::now();
-    let consumer = pco_store::fold!(QueryStat, |calls: i64, rows: i64, total_time: f64, io_time: f64, shared_blks_hit: i64, shared_blks_read: i64| {
-        calls_sum += calls;
-        rows_sum += rows;
-        total_time_sum += total_time;
-        io_time_sum += io_time;
-        hits_sum += shared_blks_hit;
-        reads_sum += shared_blks_read;
-    });
+    let consumer =
+        pco_store::fold!(QueryStat, |calls: i64, rows: i64, total_time: f64, io_time: f64, shared_blks_hit: i64, shared_blks_read: i64| {
+            calls_sum += calls;
+            rows_sum += rows;
+            total_time_sum += total_time;
+            io_time_sum += io_time;
+            hits_sum += shared_blks_hit;
+            reads_sum += shared_blks_read;
+        });
     match workers {
         None => QueryStat::for_each(db, filter, &[], consumer).await?,
         Some(workers) => QueryStat::for_each_parallel(db, filter, &[], consumer, workers).await?,
