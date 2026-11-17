@@ -3,10 +3,11 @@
 //! chunks addressed by name.
 
 use std::fs;
+use std::num::NonZeroUsize;
 
 use chrono::{DateTime, TimeZone, Utc};
 use pco_store::fs::Fs;
-use pco_store::{Backend, PcoStore, pco_store};
+use pco_store::{Backend, PcoStore, TryStreamExt, anyhow, pco_store};
 
 #[derive(Clone, Debug, PartialEq, PcoStore)]
 #[pco_store(timestamp = collected_at, index = [database_id])]
@@ -62,13 +63,19 @@ async fn fs_store_load_narrow_and_delete() {
 
     // Narrowing by key answers at readdir: only database_id 1's file is read.
     let window = (base - chrono::Duration::hours(1))..=(base + chrono::Duration::hours(1));
-    let chunks = FsStat::load(&store, &Filter::new([1i64], window.clone()), &[]).await.unwrap();
+    let chunks = FsStat::load(&store, &Filter::new([1i64], window.clone()), &[]).try_collect::<Vec<_>>().await.unwrap();
     assert_eq!(chunks.len(), 1);
     assert_eq!(rows(&chunks).iter().map(|r| r.calls).sum::<i64>(), 3);
 
-    // The full window reads both files.
-    let all = FsStat::load(&store, &Filter::new([1i64, 2i64], window.clone()), &[]).await.unwrap();
-    assert_eq!(rows(&all).iter().map(|r| r.calls).sum::<i64>(), 8);
+    // The load streams: the first chunk is pulled before the remaining files
+    // are read, and draining the rest answers the same data a collect would.
+    let streaming = Filter::new([1i64, 2i64], window.clone());
+    let mut stream = FsStat::load(&store, &streaming, &[]);
+    let mut both = vec![stream.try_next().await.unwrap().unwrap()];
+    while let Some(chunk) = stream.try_next().await.unwrap() {
+        both.push(chunk);
+    }
+    assert_eq!(rows(&both).iter().map(|r| r.calls).sum::<i64>(), 8);
 
     // Re-storing identical chunk bytes overwrites its own name: no duplicates.
     let first_file = dir.path().join(file_names(dir.path()).first().unwrap().clone());
@@ -92,7 +99,7 @@ async fn fs_store_load_narrow_and_delete() {
     assert_eq!(file_names(dir.path()).len(), 1);
 
     // With delete, the surviving file is database_id 1's chunk, intact.
-    let survivors = FsStat::load(&store, &Filter::new([1i64], window), &[]).await.unwrap();
+    let survivors = FsStat::load(&store, &Filter::new([1i64], window), &[]).try_collect::<Vec<_>>().await.unwrap();
     assert_eq!(rows(&survivors).iter().map(|r| r.calls).sum::<i64>(), 3);
 
     assert!(store.capabilities().rename);
@@ -116,7 +123,7 @@ async fn chunks_deref_and_for_each() {
     .unwrap();
     FsStat::store(&store, vec![FsStat { database_id: 2, collected_at: base, calls: 7 }]).await.unwrap();
 
-    let chunks = FsStat::load(&store, &Filter::new([1i64], window.clone()), &[]).await.unwrap();
+    let chunks = FsStat::load(&store, &Filter::new([1i64], window.clone()), &[]).try_collect::<Vec<_>>().await.unwrap();
     assert_eq!(chunks.len(), 1);
 
     // Deref reaches the stored chunk, so index columns and the timestamp
@@ -133,4 +140,134 @@ async fn chunks_deref_and_for_each() {
     let mut both = 0;
     FsStat::for_each(&store, &Filter::new([1i64, 2i64], window), &[], |row: FsStat| both += row.calls).await.unwrap();
     assert_eq!(both, 12);
+}
+
+/// Three separate store calls for database 1 make three chunk files (sums
+/// 3, 30, 300, with the row reaching 20 in the second chunk), plus one
+/// database 2 file worth 1_000 for filters to prune: enough chunks that
+/// `for_each_parallel` really pipelines, reorders across threads, and
+/// re-serializes.
+async fn store_pipeline_chunks(store: &Fs, base: DateTime<Utc>) {
+    for (minute, calls) in [(1i64, [1i64, 2]), (2, [10, 20]), (3, [100, 200])] {
+        let rows = calls
+            .iter()
+            .enumerate()
+            .map(|(i, &calls)| FsStat { database_id: 1, collected_at: base + chrono::Duration::minutes(minute * 10 + i as i64), calls })
+            .collect();
+        FsStat::store(store, rows).await.unwrap();
+    }
+    FsStat::store(store, vec![FsStat { database_id: 2, collected_at: base + chrono::Duration::minutes(30), calls: 1_000 }]).await.unwrap();
+}
+
+#[tokio::test]
+async fn for_each_parallel_matches_for_each() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let store = Fs::open(dir.path()).unwrap();
+    let base = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+    let window = base..=base + chrono::Duration::hours(1);
+    store_pipeline_chunks(&store, base).await;
+
+    let filter = Filter::new([1i64], window.clone());
+    for workers in [1, 2, 4, 8] {
+        let workers = NonZeroUsize::new(workers).unwrap();
+
+        let mut hydrated = 0;
+        FsStat::for_each_parallel(&store, &filter, &[], |row: FsStat| hydrated += row.calls, workers).await.unwrap();
+        assert_eq!(hydrated, 333, "hydration consumer with {workers:?} workers");
+
+        // A fold! projection exercises the merged projection (requested
+        // fields plus Consumer::FIELDS) through the worker pipeline too.
+        let mut folded = 0;
+        FsStat::for_each_parallel(&store, &filter, &[], pco_store::fold!(FsStat, |calls: i64| folded += calls), workers).await.unwrap();
+        assert_eq!(folded, 333, "fold! projection with {workers:?} workers");
+    }
+
+    let mut serial = 0;
+    FsStat::for_each(&store, &filter, &[], |row: FsStat| serial += row.calls).await.unwrap();
+    assert_eq!(serial, 333);
+
+    // With nothing to prune the parallel fold still sees every chunk, and
+    // agrees with its serial self over the same files.
+    let mut all_parallel = 0;
+    FsStat::for_each_parallel(
+        &store,
+        &Filter::new([1i64, 2], window.clone()),
+        &[],
+        |row: FsStat| all_parallel += row.calls,
+        NonZeroUsize::new(3).unwrap(),
+    )
+    .await
+    .unwrap();
+    let mut all_serial = 0;
+    FsStat::for_each(&store, &Filter::new([1i64, 2], window), &[], |row: FsStat| all_serial += row.calls).await.unwrap();
+    assert_eq!(all_parallel, all_serial);
+}
+
+#[tokio::test]
+async fn for_each_parallel_consumer_errors_agree_with_for_each() {
+    fn boom(row: FsStat) -> anyhow::Result<()> {
+        if row.calls >= 20 {
+            return Err(anyhow::anyhow!("boom {}", row.calls));
+        }
+        Ok(())
+    }
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let store = Fs::open(dir.path()).unwrap();
+    let base = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+    let window = base..=base + chrono::Duration::hours(1);
+    store_pipeline_chunks(&store, base).await;
+
+    let filter = Filter::new([1i64], window);
+    let serial = FsStat::for_each(&store, &filter, &[], boom).await.unwrap_err().to_string();
+    assert_eq!(serial, "boom 20", "the first row at or past 20 in load order");
+    for workers in [1, 2, 8] {
+        let parallel = FsStat::for_each_parallel(&store, &filter, &[], boom, NonZeroUsize::new(workers).unwrap()).await.unwrap_err().to_string();
+        assert_eq!(parallel, serial, "consumer errors must land at the same row with {workers} workers");
+    }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn for_each_parallel_abort_detaches_preparation_threads() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let store = Fs::open(dir.path()).unwrap();
+    let base = Utc.with_ymd_and_hms(2026, 1, 1, 0, 0, 0).unwrap();
+    let window = base..=base + chrono::Duration::hours(1);
+    store_pipeline_chunks(&store, base).await;
+    let path = dir.path().to_path_buf();
+    let filter = Filter::new([1i64], window.clone());
+
+    let (release_tx, release_rx) = std::sync::mpsc::channel::<()>();
+    let task = tokio::spawn(async move {
+        let store = Fs::open(&path).unwrap();
+        let blocker = release_rx;
+        // Park on the first folded row; after the test releases and drops
+        // its sender, later rows return immediately.
+        FsStat::for_each_parallel(
+            &store,
+            &filter,
+            &[],
+            move |_row: FsStat| {
+                blocker.recv().ok();
+            },
+            NonZeroUsize::new(2).unwrap(),
+        )
+        .await
+    });
+    tokio::task::yield_now().await;
+    tokio::task::yield_now().await;
+    task.abort();
+    // A future parked inside a consumer cannot drop until the consumer
+    // returns, so release it; the cancel then lands at the next await point
+    // and the future drops without joining the detached threads.
+    let _ = release_tx.send(());
+    drop(release_tx);
+    assert!(task.await.unwrap_err().is_cancelled());
+
+    // The aborted pipeline left nothing behind: a serial fold over the same
+    // files answers cleanly.
+    let store = Fs::open(dir.path()).unwrap();
+    let mut sum = 0;
+    FsStat::for_each(&store, &Filter::new([1i64], window), &[], |row: FsStat| sum += row.calls).await.unwrap();
+    assert_eq!(sum, 333);
 }

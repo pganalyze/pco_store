@@ -1,8 +1,9 @@
 //! Filesystem adapter generation: one `Backend` impl over
 //! `pco_store::fs::Fs`. The chunk file name carries the table, the sanitized
 //! `index` key, and the timestamp bounds, so `load` narrows by readdir and
-//! name parsing before reading any bytes; the whole-chunk codec sits between
-//! encoding and the durable directory.
+//! name parsing before reading any bytes and streams each surviving chunk as
+//! its file is read; the whole-chunk codec sits between encoding and the
+//! durable directory.
 //!
 //! Name layout, pinned here: `{table}~{key}~{bounds}~{digest}.bin`. `~` and
 //! `|` never appear inside a sanitized value, so segments split cleanly;
@@ -58,24 +59,12 @@ pub(super) fn generate(model: &ItemStruct, table: &str, index: &[Ident], timesta
                 })
             }
 
-            fn load<'a>(&'a self, filter: &'a #filter, fields: &'a [&str]) -> pco_store::BoxFuture<'a, pco_store::anyhow::Result<Vec<pco_store::Chunk<#name>>>> {
-                Box::pin(async move {
-                    let filter_json: pco_store::pco_pack::serde_json::Value = filter.clone().try_into()?;
-                    let resolved = <#name as pco_store::pco_pack::PcoPack>::resolve_fields(&filter_json, fields)?;
-                    let resolved_fields: Vec<String> = resolved.iter().map(|f| (*f).to_string()).collect();
-                    #narrow
-                    let mut chunks = Vec::new();
-                    for found in self.dur().list_names()? {
-                        let name = found.to_string_lossy().into_owned();
-                        if !narrows(&name, filter) {
-                            continue;
-                        }
-                        let Some(bytes) = self.dur().get(&name)? else { continue };
-                        let chunk = pco_store::decode_chunk::<#name>(&bytes)?;
-                        chunks.push(pco_store::Chunk { chunk, filter: filter.clone(), fields: resolved_fields.clone() });
-                    }
-                    Ok(chunks)
-                })
+            fn load<'a>(&'a self, filter: &'a #filter, fields: &'a [&str]) -> pco_store::BoxStream<'a, pco_store::anyhow::Result<pco_store::Chunk<#name>>> {
+                // The name-time narrowing runs first, so a nonmatching file is
+                // never opened, and each matching file is read and answered
+                // one chunk at a time as the consumer pulls.
+                #narrow
+                pco_store::fs::read_chunks::<#name>(self.dur(), filter, fields, narrows)
             }
 
             fn delete<'a>(&'a self, filter: &'a #filter) -> pco_store::BoxFuture<'a, pco_store::anyhow::Result<Vec<pco_store::Chunk<#name>>>> {

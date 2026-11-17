@@ -1,7 +1,7 @@
 use anyhow::Context;
 use chrono::{DateTime, Utc};
 use pco_store::pco_pack::PcoPack;
-use pco_store::{Backend, PcoStore, pco_store};
+use pco_store::{Backend, PcoStore, TryStreamExt, pco_store};
 use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, PcoStore)]
@@ -88,7 +88,7 @@ async fn test() -> anyhow::Result<()> {
 
 async fn load(pg: &Arc<dyn Backend<QueryStat>>, filter: Filter) -> anyhow::Result<Vec<QueryStat>> {
     let mut rows = Vec::new();
-    for chunk in pg.load(&filter, &[]).await? {
+    for chunk in pg.load(&filter, &[]).try_collect::<Vec<_>>().await? {
         rows.extend(chunk.decompress()?);
     }
     rows.sort_by_key(|s| (s.fingerprint, s.collected_at));

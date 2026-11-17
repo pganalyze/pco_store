@@ -5,7 +5,7 @@
 
 use chrono::{DateTime, Utc};
 use pco_store::pco_pack::PcoPack;
-use pco_store::{Backend, PcoStore, pco_store};
+use pco_store::{Backend, PcoStore, TryStreamExt, pco_store};
 use smol_str::SmolStr;
 use std::sync::Arc;
 
@@ -50,7 +50,7 @@ async fn store_rows_with_regions(pg: &Arc<dyn Backend<SmolMetric>>, regions: Vec
 
 async fn load_all(pg: &Arc<dyn Backend<SmolMetric>>, filter: Filter) -> anyhow::Result<Vec<SmolMetric>> {
     let mut results = Vec::new();
-    for chunk in pg.load(&filter, &[]).await? {
+    for chunk in pg.load(&filter, &[]).try_collect::<Vec<_>>().await? {
         results.extend(chunk.decompress()?);
     }
     Ok(results)
@@ -150,7 +150,7 @@ async fn test_smostr_field_roundtrip_non_index() -> anyhow::Result<()> {
     filter.database_id = Some(901.into());
 
     let mut results = Vec::new();
-    for chunk in pg.load(&filter, &[]).await? {
+    for chunk in pg.load(&filter, &[]).try_collect::<Vec<_>>().await? {
         results.extend(chunk.decompress()?);
     }
     assert_eq!(results.len(), 1);

@@ -30,14 +30,25 @@ Now with the optimized data model, this benchmark compares the performance of us
 
 ## `synthetic.rs`
 
-Unlike the previous benchmarks, this generates synthetic data and measures the time and peak memory usage of each operation.
+Unlike the previous benchmarks, this generates synthetic data (100 database ids, 1M rows each, so four chunks per key) and measures the time and peak memory usage of each operation; read-scenario labels list the percent of stored rows the filter matches. The run prints its results as one markdown table via the [markdown-tables](https://crates.io/crates/markdown-tables) crate, so a fresh run pastes straight into this file. store and load both hold all 100M rows, hence the 18 GB peaks, and the store time is the time inside pco_store, excluding the synthetic-row generation. The final fold section runs the filter scenario's selective query through one `fold!` projection, once through `for_each` and once through `for_each_parallel` at 2 and 4 worker threads, asserting every variant sums to the same values; fold peaks rise with the worker count because the pipeline window holds about `workers + 1` decoded chunks.
 
-| Operation    | Time   | Peak memory |
-| ------------ | ------ | ----------- |
-| store        | 983 ms | 2304 MB     |
-| load         | 395 ms | 7 MB        |
-| reduce       | 468 ms | 26 MB       |
-| filter       | 2 ms   | 3 MB        |
+| Operation                                        | Time    | Peak memory |
+|--------------------------------------------------|---------|-------------|
+| store                                            | 5.8 s   | 18432 MB    |
+| load (100% of rows)                              | 7.2 s   | 18458 MB    |
+| reduce (100% of rows)                            | 5.9 s   | 65 MB       |
+| filter (3 databases + fingerprint range, 0.096%) | 36.3 ms | 23 MB       |
+| fold (0.096% of rows, serial)                    | 26.7 ms | 18 MB       |
+| fold (`for_each_parallel`, 2)                    | 14.2 ms | 36 MB       |
+| fold (`for_each_parallel`, 4)                    | 9.2 ms  | 65 MB       |
+
+For the selective query the per-chunk filter scan and decode dominate the
+fold task, since the fold walk itself only touches the 96k matched rows, so
+the parallel path reaches about 3x at four workers and finishes under the
+filter scenario's own load time (36 ms). A fold where most rows match is the
+opposite shape: the fold walk over delivered rows becomes the serial floor
+(the A3 gate) and extra workers stop helping, and a multi-value `= ANY`
+never prunes server-side, so the wall there is delivery-dominated anyway.
 
 # Setup
 

@@ -2,7 +2,7 @@ use super::DB_POOL;
 use anyhow::Context;
 use chrono::{DateTime, Duration, Utc};
 use pco_store::pco_pack::PcoPack;
-use pco_store::{Backend, PcoStore, pco_store};
+use pco_store::{Backend, PcoStore, TryStreamExt, pco_store};
 use serde_json::json;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -34,7 +34,7 @@ async fn string() -> anyhow::Result<()> {
 
         async fn load(pg: &Arc<dyn Backend<Model>>, filter: Filter) -> anyhow::Result<Vec<Model>> {
             let mut rows = Vec::new();
-            for chunk in pg.load(&filter, &[]).await? {
+            for chunk in pg.load(&filter, &[]).try_collect::<Vec<_>>().await? {
                 rows.extend(chunk.decompress()?);
             }
             rows.sort_by_key(|s| (s.id, s.name.clone(), s.time));
@@ -115,7 +115,7 @@ async fn string() -> anyhow::Result<()> {
 
         async fn load(pg: &Arc<dyn Backend<Model>>, filter: Filter) -> anyhow::Result<Vec<Model>> {
             let mut rows = Vec::new();
-            for chunk in pg.load(&filter, &[]).await? {
+            for chunk in pg.load(&filter, &[]).try_collect::<Vec<_>>().await? {
                 rows.extend(chunk.decompress()?);
             }
             rows.sort_by_key(|s| (s.id, s.name.clone(), s.time));

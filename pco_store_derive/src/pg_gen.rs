@@ -1,12 +1,13 @@
 //! Postgres adapter generation: one `Backend` impl over the pool handle
 //! (`pco_store::pg::Postgres`, which checks a client out per call) and one
 //! over the checked-out pooled client itself
-//! (`pco_store::deadpool_postgres::Object`), both running COPY, SELECT, and
-//! DELETE. `index` columns stay plain so SQL keeps its teeth; BYTEA payload
-//! columns hold the compressed bytes exactly as the codec wrote them.
-//! Generated code names the Postgres stack through `pco_store::tokio_postgres`
-//! and `pco_store::deadpool_postgres`, so only the runtime depends on it
-//! directly. `sql_where` is the shared WHERE-builder core.
+//! (`pco_store::deadpool_postgres::Object`), both running COPY, a streamed
+//! SELECT, and DELETE. `index` columns stay plain so SQL keeps its teeth;
+//! BYTEA payload columns hold the compressed bytes exactly as the codec wrote
+//! them. Generated code names the Postgres stack through
+//! `pco_store::tokio_postgres` and `pco_store::deadpool_postgres`, so only the
+//! runtime depends on it directly. `sql_where` is the shared WHERE-builder
+//! core.
 
 use quote::{ToTokens, quote};
 use syn::{Field, Ident, ItemStruct};
@@ -61,7 +62,7 @@ pub(super) fn generate(model: &ItemStruct, table: &str, index: &[Ident], timesta
     // connection. The pool handle checks a client out per call; a
     // checked-out pooled client already *is* that connection, which keeps
     // the statement cache of `prepare_cached` on both paths.
-    let backend_impl = |self_ty: proc_macro2::TokenStream, client: proc_macro2::TokenStream| {
+    let backend_impl = |self_ty: proc_macro2::TokenStream, client: proc_macro2::TokenStream, db: proc_macro2::TokenStream| {
         quote! {
             impl pco_store::Backend<#name> for #self_ty {
                 fn store<'a>(&'a self, chunks: &'a [#chunk]) -> pco_store::BoxFuture<'a, pco_store::anyhow::Result<()>> {
@@ -81,9 +82,11 @@ pub(super) fn generate(model: &ItemStruct, table: &str, index: &[Ident], timesta
                     })
                 }
 
-                fn load<'a>(&'a self, filter: &'a #filter, fields: &'a [&str]) -> pco_store::BoxFuture<'a, pco_store::anyhow::Result<Vec<pco_store::Chunk<#name>>>> {
-                    Box::pin(async move {
-                        type ChunkT = #chunk;
+                fn load<'a>(&'a self, filter: &'a #filter, fields: &'a [&str]) -> pco_store::BoxStream<'a, pco_store::anyhow::Result<pco_store::Chunk<#name>>> {
+                    // Plan the query before contacting the database: a filter
+                    // that will not convert or a field that will not resolve
+                    // answers as the stream's only item, not a hung stream.
+                    let plan: pco_store::anyhow::Result<_> = (|| {
                         let mut where_clauses: Vec<String> = Vec::new();
                         let mut params: Vec<&(dyn pco_store::tokio_postgres::types::ToSql + Sync)> = Vec::new();
                         #(#where_builders)*
@@ -93,22 +96,30 @@ pub(super) fn generate(model: &ItemStruct, table: &str, index: &[Ident], timesta
                             format!("WHERE {}", where_clauses.join(" AND "))
                         };
                         let filter_json: pco_store::pco_pack::serde_json::Value = filter.clone().try_into()?;
-                        let fields = <#name as pco_store::pco_pack::PcoPack>::resolve_fields(&filter_json, fields)?;
+                        let resolved = <#name as pco_store::pco_pack::PcoPack>::resolve_fields(&filter_json, fields)?;
+                        let fields = resolved;
                         #select_columns
                         let query_sql = format!("SELECT {} FROM {} {}", select_columns.join(", "), #table, sql_where);
                         let resolved_fields: Vec<String> = fields.iter().map(|f| (*f).to_string()).collect();
-                        let db = #client;
-                        let mut chunks = Vec::new();
-                        for row in db.query(&db.prepare_cached(&query_sql).await?, &params).await? {
-                            let mut index = 0;
-                            chunks.push(pco_store::Chunk {
-                                chunk: #chunk_from_row,
-                                filter: filter.clone(),
-                                fields: resolved_fields.clone(),
-                            });
+                        Ok((query_sql, params, fields, resolved_fields))
+                    })();
+                    let (query_sql, params, resolved, resolved_fields) = match plan {
+                        Ok(plan) => plan,
+                        Err(err) => return pco_store::stream_err::<#name>(err),
+                    };
+                    // One row becomes one storage chunk the moment the server
+                    // delivers it.
+                    let to_chunk = move |row: &pco_store::tokio_postgres::Row| {
+                        let mut index = 0;
+                        let fields: &[&str] = &resolved;
+                        type ChunkT = #chunk;
+                        pco_store::Chunk {
+                            chunk: #chunk_from_row,
+                            filter: filter.clone(),
+                            fields: resolved_fields.clone(),
                         }
-                        Ok(chunks)
-                    })
+                    };
+                    pco_store::pg::query_stream::<#name>(#db, query_sql, params, to_chunk)
                 }
 
                 /// Deletes matching rows and returns whole chunks with empty
@@ -150,8 +161,8 @@ pub(super) fn generate(model: &ItemStruct, table: &str, index: &[Ident], timesta
             }
         }
     };
-    let handle = backend_impl(quote! { pco_store::pg::Postgres }, quote! { self.client().await? });
-    let pooled_client = backend_impl(quote! { pco_store::deadpool_postgres::Object }, quote! { self });
+    let handle = backend_impl(quote! { pco_store::pg::Postgres }, quote! { self.client().await? }, quote! { pco_store::pg::Db::Pool(self) });
+    let pooled_client = backend_impl(quote! { pco_store::deadpool_postgres::Object }, quote! { self }, quote! { pco_store::pg::Db::Borrowed(self) });
     quote! { #handle #pooled_client }
 }
 

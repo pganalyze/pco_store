@@ -1,7 +1,7 @@
 use anyhow::Context;
 use chrono::{DateTime, Utc};
 use pco_store::pco_pack::PcoPack;
-use pco_store::{Backend, PcoStore, pco_store};
+use pco_store::{Backend, PcoStore, TryStreamExt, pco_store};
 use std::sync::Arc;
 
 #[derive(Clone, Debug, PartialEq, PcoStore)]
@@ -98,7 +98,7 @@ async fn test_selective_field_loading() -> anyhow::Result<()> {
     pg.store(&QueryStat::write(vec![s])?).await?;
 
     // Load only fingerprint field
-    let chunks = pg.load(&Filter::new([5], [60], t..=t), &["fingerprint"]).await?;
+    let chunks = pg.load(&Filter::new([5], [60], t..=t), &["fingerprint"]).try_collect::<Vec<_>>().await?;
     assert_eq!(chunks.len(), 1);
     let chunk = &chunks[0];
 
@@ -115,7 +115,7 @@ async fn test_selective_field_loading() -> anyhow::Result<()> {
     assert_eq!(decompressed[0].fingerprint, 42);
 
     // Load with empty fields (all fields)
-    let chunks = pg.load(&Filter::new([5], [60], t..=t), &[]).await?;
+    let chunks = pg.load(&Filter::new([5], [60], t..=t), &[]).try_collect::<Vec<_>>().await?;
     assert_eq!(chunks.len(), 1);
     let decompressed = chunks[0].decompress()?;
     assert_eq!(decompressed[0].database_id, 5);
@@ -155,7 +155,7 @@ async fn test_filter_fields_auto_included() -> anyhow::Result<()> {
     // Filter on fingerprint but request no explicit fields - fingerprint should be auto-included
     let mut f = Filter::new([5], [60], t..=t);
     f["fingerprint"] = serde_json::json!([2]);
-    let chunks = pg.load(&f, &[]).await?;
+    let chunks = pg.load(&f, &[]).try_collect::<Vec<_>>().await?;
     assert_eq!(chunks.len(), 1);
 
     // Verify fingerprint field is in the resolved fields
@@ -204,7 +204,7 @@ async fn test_no_timestamp_fields() -> anyhow::Result<()> {
     .await?;
 
     // Load only calls field
-    let chunks = pg.load(&Filter::new([1]), &["calls"]).await?;
+    let chunks = pg.load(&Filter::new([1]), &["calls"]).try_collect::<Vec<_>>().await?;
     assert_eq!(chunks.len(), 1);
     let decompressed = chunks[0].decompress()?;
     assert_eq!(decompressed.len(), 2);
@@ -212,7 +212,7 @@ async fn test_no_timestamp_fields() -> anyhow::Result<()> {
     assert_eq!(decompressed[1].calls, 20);
 
     // Load all fields
-    let chunks = pg.load(&Filter::new([1]), &[]).await?;
+    let chunks = pg.load(&Filter::new([1]), &[]).try_collect::<Vec<_>>().await?;
     let decompressed = chunks[0].decompress()?;
     assert_eq!(decompressed[0].total_time, 1.5);
     assert_eq!(decompressed[1].total_time, 2.5);
@@ -222,7 +222,7 @@ async fn test_no_timestamp_fields() -> anyhow::Result<()> {
 
 async fn load(pg: &Arc<dyn Backend<QueryStat>>, filter: Filter, fields: &[&str]) -> anyhow::Result<Vec<QueryStat>> {
     let mut rows = Vec::new();
-    for chunk in pg.load(&filter, fields).await? {
+    for chunk in pg.load(&filter, fields).try_collect::<Vec<_>>().await? {
         rows.extend(chunk.decompress()?);
     }
     rows.sort_by_key(|s| (s.fingerprint, s.collected_at));

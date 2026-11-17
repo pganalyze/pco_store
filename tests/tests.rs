@@ -4,7 +4,7 @@ use ahash::AHashMap;
 use chrono::{DateTime, DurationRound, Utc};
 use pco_store::pco_pack::PcoPack;
 use pco_store::pg::Postgres;
-use pco_store::{Backend, PcoStore, pco_store};
+use pco_store::{Backend, PcoStore, TryStreamExt, pco_store};
 use std::collections::hash_map::Entry;
 use std::str::FromStr;
 use std::sync::Arc;
@@ -84,7 +84,7 @@ async fn timestamp() {
 
     // Read
     let mut calls = 0;
-    for chunk in pg.load(&Filter::new([database_id], start..=end), &[]).await.unwrap() {
+    for chunk in pg.load(&Filter::new([database_id], start..=end), &[]).try_collect::<Vec<_>>().await.unwrap() {
         for stat in chunk.decompress().unwrap() {
             calls += stat.calls;
         }
@@ -93,7 +93,7 @@ async fn timestamp() {
 
     // Load before delete so we can compare against what delete returns
     let mut loaded = Vec::new();
-    for chunk in pg.load(&Filter::new([database_id], start..=end), &[]).await.unwrap() {
+    for chunk in pg.load(&Filter::new([database_id], start..=end), &[]).try_collect::<Vec<_>>().await.unwrap() {
         loaded.extend(chunk.decompress().unwrap());
     }
     // Delete and re-store to improve compression (pco_pack handles chunking)
@@ -112,7 +112,7 @@ async fn timestamp() {
     // Re-store all at once (pco_pack handles chunking internally)
     pg.store(&QueryStat::write(loaded.clone()).unwrap()).await.unwrap();
     assert_eq!(1, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
-    for chunk in pg.load(&Filter::new([database_id], start..=end), &[]).await.unwrap() {
+    for chunk in pg.load(&Filter::new([database_id], start..=end), &[]).try_collect::<Vec<_>>().await.unwrap() {
         loaded.extend(chunk.decompress().unwrap());
     }
     assert_eq!(loaded[0].collected_at, end - chrono::Duration::seconds(120));
@@ -131,7 +131,7 @@ async fn timestamp() {
     let start = start + chrono::Duration::seconds(3 * 60); // minute 3, skipping the first 2 minutes in the group
     let end = start + chrono::Duration::seconds(23 * 60); // minute 26, skipping the last 4 minutes in the group
     let mut loaded = Vec::new();
-    for chunk in pg.load(&Filter::new([database_id], start..=end), &[]).await.unwrap() {
+    for chunk in pg.load(&Filter::new([database_id], start..=end), &[]).try_collect::<Vec<_>>().await.unwrap() {
         loaded.extend(chunk.decompress().unwrap());
     }
     assert_eq!(loaded.len(), 24);
@@ -166,7 +166,7 @@ async fn timestamp() {
         let stat = QueryStat { database_id, collected_at: end, fingerprint: 1, calls: 1, total_time: 1.0, new_col: 1 };
         pg.store(&QueryStat::write(vec![stat]).unwrap()).await.unwrap();
         let mut loaded = Vec::new();
-        for chunk in pg.load(&Filter::new([database_id], start..=end), &[]).await.unwrap() {
+        for chunk in pg.load(&Filter::new([database_id], start..=end), &[]).try_collect::<Vec<_>>().await.unwrap() {
             loaded.extend(chunk.decompress().unwrap());
         }
         assert_eq!(loaded.len(), 29);
@@ -283,7 +283,7 @@ async fn aggregate() {
 
     // Read
     let mut calls = 0;
-    for chunk in pg.load(&Filter::new([database_id], [granularity], start..=end), &[]).await.unwrap() {
+    for chunk in pg.load(&Filter::new([database_id], [granularity], start..=end), &[]).try_collect::<Vec<_>>().await.unwrap() {
         for stat in chunk.decompress().unwrap() {
             calls += stat.calls;
         }
@@ -295,7 +295,7 @@ async fn aggregate() {
     let mut stats: AHashMap<_, QueryStat> = AHashMap::new();
     let start = DateTime::<Utc>::from(SystemTime::now() - std::time::Duration::from_secs(3600)).duration_trunc(chrono::Duration::hours(1)).unwrap();
     let end = start + chrono::Duration::seconds(3600);
-    for chunk in pg.load(&Filter::new([database_id], [granularity], start..=end), &[]).await.unwrap() {
+    for chunk in pg.load(&Filter::new([database_id], [granularity], start..=end), &[]).try_collect::<Vec<_>>().await.unwrap() {
         for stat in chunk.decompress().unwrap() {
             match stats.entry((stat.database_id, stat.fingerprint)) {
                 Entry::Occupied(mut entry) => {
@@ -319,7 +319,7 @@ async fn aggregate() {
 
     // Load hourly aggregates using typed filter field for granularity
     let mut loaded = Vec::new();
-    for chunk in pg.load(&Filter::new([database_id], [3600], start..=end), &[]).await.unwrap() {
+    for chunk in pg.load(&Filter::new([database_id], [3600], start..=end), &[]).try_collect::<Vec<_>>().await.unwrap() {
         loaded.extend(chunk.decompress().unwrap());
     }
     assert_eq!(loaded.len(), 1);
@@ -414,7 +414,7 @@ async fn partition_pruning() {
     // The statement text is stable across iterations, so this reuses the cached prepared statement.
     let mut calls = 0;
     for _ in 0..3 {
-        for chunk in pg.load(&Filter::new([database_id], [3600], start..=end), &[]).await.unwrap() {
+        for chunk in pg.load(&Filter::new([database_id], [3600], start..=end), &[]).try_collect::<Vec<_>>().await.unwrap() {
             for stat in chunk.decompress().unwrap() {
                 calls += stat.calls;
             }
@@ -437,7 +437,7 @@ async fn partition_pruning() {
 
     // A multi-value inclusion must still load both partitions.
     let mut calls = 0;
-    for chunk in pg.load(&Filter::new([database_id], [60, 3600], start..=end), &[]).await.unwrap() {
+    for chunk in pg.load(&Filter::new([database_id], [60, 3600], start..=end), &[]).try_collect::<Vec<_>>().await.unwrap() {
         for stat in chunk.decompress().unwrap() {
             calls += stat.calls;
         }
@@ -480,7 +480,7 @@ async fn no_timestamp() {
 
     // Read
     let mut calls = 0;
-    for chunk in pg.load(&Filter::new([database_id]), &[]).await.unwrap() {
+    for chunk in pg.load(&Filter::new([database_id]), &[]).try_collect::<Vec<_>>().await.unwrap() {
         for stat in chunk.decompress().unwrap() {
             calls += stat.calls;
         }
@@ -489,7 +489,7 @@ async fn no_timestamp() {
 
     // Load before delete so we can compare against what delete returns
     let mut loaded = Vec::new();
-    for chunk in pg.load(&Filter::new([database_id]), &[]).await.unwrap() {
+    for chunk in pg.load(&Filter::new([database_id]), &[]).try_collect::<Vec<_>>().await.unwrap() {
         loaded.extend(chunk.decompress().unwrap());
     }
     // Delete and re-store
@@ -507,7 +507,7 @@ async fn no_timestamp() {
     assert_eq!(0, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
     pg.store(&QueryStat::write(loaded.clone()).unwrap()).await.unwrap();
     assert_eq!(1, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
-    for chunk in pg.load(&Filter::new([database_id]), &[]).await.unwrap() {
+    for chunk in pg.load(&Filter::new([database_id]), &[]).try_collect::<Vec<_>>().await.unwrap() {
         loaded.extend(chunk.decompress().unwrap());
     }
     assert_eq!(loaded[0].calls, 1);
@@ -548,7 +548,7 @@ async fn no_index() {
 
     // Read
     let mut calls = 0;
-    for chunk in pg.load(&Filter::default(), &[]).await.unwrap() {
+    for chunk in pg.load(&Filter::default(), &[]).try_collect::<Vec<_>>().await.unwrap() {
         for stat in chunk.decompress().unwrap() {
             calls += stat.calls;
         }
@@ -557,7 +557,7 @@ async fn no_index() {
 
     // Load before delete so we can compare against what delete returns
     let mut loaded = Vec::new();
-    for chunk in pg.load(&Filter::default(), &[]).await.unwrap() {
+    for chunk in pg.load(&Filter::default(), &[]).try_collect::<Vec<_>>().await.unwrap() {
         loaded.extend(chunk.decompress().unwrap());
     }
     // Delete and re-store
@@ -575,7 +575,7 @@ async fn no_index() {
     assert_eq!(0, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
     pg.store(&QueryStat::write(loaded.clone()).unwrap()).await.unwrap();
     assert_eq!(1, db.query_one("SELECT count(*) FROM query_stats", &[]).await.unwrap().get::<_, i64>(0));
-    for chunk in pg.load(&Filter::default(), &[]).await.unwrap() {
+    for chunk in pg.load(&Filter::default(), &[]).try_collect::<Vec<_>>().await.unwrap() {
         loaded.extend(chunk.decompress().unwrap());
     }
     assert_eq!(loaded[0].calls, 1);
@@ -616,7 +616,7 @@ async fn table_name() {
 
     // Read
     let mut calls = 0;
-    for chunk in pg.load(&Filter::default(), &[]).await.unwrap() {
+    for chunk in pg.load(&Filter::default(), &[]).try_collect::<Vec<_>>().await.unwrap() {
         for stat in chunk.decompress().unwrap() {
             calls += stat.calls;
         }
@@ -658,7 +658,7 @@ async fn float_round() {
 
     // Read
     let mut total_time = 0.0;
-    for chunk in pg.load(&Filter::new([database_id]), &[]).await.unwrap() {
+    for chunk in pg.load(&Filter::new([database_id]), &[]).try_collect::<Vec<_>>().await.unwrap() {
         for stat in chunk.decompress().unwrap() {
             total_time += stat.total_time;
         }
@@ -698,7 +698,7 @@ async fn float_round() {
 
         // Read
         let mut total_time = 0.0;
-        for chunk in pg.load(&Filter::new([database_id]), &[]).await.unwrap() {
+        for chunk in pg.load(&Filter::new([database_id]), &[]).try_collect::<Vec<_>>().await.unwrap() {
             for stat in chunk.decompress().unwrap() {
                 total_time += stat.total_time;
             }
@@ -740,7 +740,7 @@ async fn boolean() {
 
     // Read
     let mut loaded = Vec::new();
-    for chunk in pg.load(&Filter::new([database_id]), &[]).await.unwrap() {
+    for chunk in pg.load(&Filter::new([database_id]), &[]).try_collect::<Vec<_>>().await.unwrap() {
         loaded.extend(chunk.decompress().unwrap());
     }
     assert_eq!(loaded, stats);

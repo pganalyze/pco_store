@@ -8,7 +8,12 @@ pub mod backend;
 pub mod fs;
 
 pub use anyhow;
-pub use backend::{Backend, BoxFuture, Capabilities, Chunk, Filter, PcoStore, decode_chunk, encode_chunk};
+pub use backend::{Backend, BoxFuture, BoxStream, Capabilities, Chunk, Filter, PcoStore, decode_chunk, encode_chunk, stream_err};
+
+/// Re-exports so consuming a `load` stream (`try_next` and `try_collect`
+/// through `TryStreamExt`, plain `next` through `StreamExt`) need no futures
+/// dependency of the user's own, the way `fold!` is re-exported.
+pub use futures::{TryStreamExt, stream::StreamExt};
 pub use pco_store_derive::{PcoStore, pco_store};
 
 // Re-exports for the code `#[derive(PcoStore)]` generates: generated

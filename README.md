@@ -26,11 +26,11 @@ pub struct QueryStat {
 ```
 
 - `name` prefixes every storage object for the model: the Postgres table, the filesystem file names, future object keys. It defaults to the struct name in snake_case with a plural `s` (`QueryStat` becomes `query_stats`).
-- `fs` persists each chunk as one file in a durable directory. The file name carries the table, the sanitized `index` key, and the timestamp bounds, so `load` narrows by directory listing before reading any bytes. Local storage is the only backend this build ships by default.
-- `postgres` re-homes the upstream COPY, SELECT, and DELETE plumbing. It compiles only under the `postgres` feature, so local-only builds never carry the Postgres stack.
+- `fs` persists each chunk as one file in a durable directory. The file name carries the table, the sanitized `index` key, and the timestamp bounds, so `load` narrows by directory listing before reading any bytes, then streams each surviving chunk as its file is read. Local storage is the only backend this build ships by default.
+- `postgres` re-homes the upstream COPY, SELECT, and DELETE plumbing. The SELECT runs through `query_raw`, so chunks stream as rows arrive while the WHERE (with the partition-exclusion narrowing) still does the filtering server-side in one round trip. It compiles only under the `postgres` feature, so local-only builds never carry the Postgres stack.
 - An `object` backend is reserved for the offload rung and lands later.
 
-The `PcoStore` trait gives every model its `store`, `load`, `delete`, and `for_each`: `store` takes rows and groups them into chunks, `load` returns storage-level `Chunk`s, `delete` returns whole chunks with empty filters so a re-store loses nothing, and `for_each` streams a whole load through one consumer (a `fold!` projection, if you want the speed) without materializing rows. The derive implements it, so `QueryStat::store(db, rows)` reads like data access without putting inherent methods on your struct; the trait shares the derive's name, and one `use pco_store::PcoStore` brings both into scope. A `Chunk` derefs to the pco_pack chunk it holds, so index columns and the `start_at`/`end_at` bounds read directly, and `decompress` applies the filter and fields it was loaded under. Any `&Backend` answers the calls: a `Postgres` handle, a checked-out pooled client, an `Fs` directory, or an `Arc<dyn Backend<M>>` picked at runtime. The `Backend` trait is the adapter side of the same calls, and `capabilities()` reports what each adapter really guarantees, so the trait never flattens a cloud down to the atomicity of Postgres.
+The `PcoStore` trait gives every model its `store`, `load`, `delete`, `for_each`, and `for_each_parallel`: `store` takes rows and groups them into chunks, `load` streams storage-level `Chunk`s as the adapter produces them (pull with `try_next`, drain with `try_collect`; the crate re-exports the `TryStreamExt` trait so neither needs a futures dependency of your own), `delete` returns whole chunks with empty filters so a re-store loses nothing, and `for_each` streams a whole load through one consumer as its chunks load (a `fold!` projection, if you want the speed) without materializing rows or a chunk vector. `for_each_parallel` adds a worker count and decodes up to `workers` chunks ahead on worker threads while the fold stays serial through the same one consumer in the same order: decode-bound projections gain the overlap, fold-heavy consumers stay about where `for_each` already was, and a load of one chunk gains nothing. Each adapter picks its own request shape behind the one signature: the filesystem reads file by file, Postgres streams the single narrowed query, and a future object adapter lists one key prefix per index tuple and pipelines the point GETs. Stopping a load stream early stops paying for it. The derive implements it, so `QueryStat::store(db, rows)` reads like data access without putting inherent methods on your struct; the trait shares the derive's name, and one `use pco_store::PcoStore` brings both into scope. A `Chunk` derefs to the pco_pack chunk it holds, so index columns and the `start_at`/`end_at` bounds read directly, and `decompress` applies the filter and fields it was loaded under. Any `&Backend` answers the calls: a `Postgres` handle, a checked-out pooled client, an `Fs` directory, or an `Arc<dyn Backend<M>>` picked at runtime. The `Backend` trait is the adapter side of the same calls, and `capabilities()` reports what each adapter really guarantees, so the trait never flattens a cloud down to the atomicity of Postgres.
 
 Each method borrows a pooled client per call, so sequences that must commit atomically live above pco_store.
 
@@ -60,7 +60,7 @@ To see what pco_store generates, look at [pco_store_derive/tests/expand_derive](
 Put every model setting on one `#[pco_store(...)]`, written below `#[derive(PcoStore)]`. `name` carries the shared storage prefix; `timestamp`, `index`, `float_round`, `time_round`, and `chunk_size` are forwarded to pco_pack automatically. The crate features decide which `Backend` impls exist. Each backend reports its atomicity honestly:
 
 - `fs` (default) writes each chunk as one file in a durable directory.
-- `postgres` runs COPY, SELECT, and DELETE against the named table. Compiles only under the `postgres` feature, so local-only builds never carry the Postgres stack.
+- `postgres` runs COPY, a streamed SELECT, and DELETE against the named table. Compiles only under the `postgres` feature, so local-only builds never carry the Postgres stack.
 
 On `#[pco_store(...)]`: `timestamp = field` marks the timestamp field for range-based chunk filtering (it must be `chrono::DateTime<Utc>`); `index = [fields]` stores those fields uncompressed for SQL-level filtering before decompression (supported types: `i64`, `i32`, `String`, `smol_str::SmolStr`, `uuid::Uuid`, `bool`); `float_round = N` rounds floats to `N` decimal places; `time_round` rounds timestamps; `chunk_size` bounds rows per chunk (default 262,144). See pco_pack's [macro settings](https://github.com/pganalyze/pco_pack#macro-settings).
 
@@ -71,6 +71,7 @@ Define a struct and create a matching Postgres table. The composite index covers
 ```rs
 use chrono::{DateTime, Utc};
 use pco_store::PcoStore;
+use pco_store::TryStreamExt;
 use pco_store::pco_store;
 
 #[derive(Clone, Debug, PartialEq, PcoStore)]
@@ -115,10 +116,12 @@ async fn example() -> anyhow::Result<()> {
     QueryStat::store(db, vec![QueryStat { collected_at: now - chrono::Duration::seconds(120), ..default }]).await?;
     QueryStat::store(db, vec![QueryStat { collected_at: now - chrono::Duration::seconds(60), ..default }]).await?;
 
-    // Read. The generated WHERE narrows by index fields and timestamp bounds.
+    // Read. The generated WHERE narrows by index fields and timestamp bounds,
+    // and chunks stream in as the query produces them.
     let mut calls = 0;
     let filter = Filter::new([database_id], [granularity], DateTime::<Utc>::UNIX_EPOCH..=now);
-    for chunk in QueryStat::load(db, &filter, &[]).await? {
+    let mut chunks = QueryStat::load(db, &filter, &[]);
+    while let Some(chunk) = chunks.try_next().await? {
         for stat in chunk.decompress()? {
             calls += stat.calls;
         }
@@ -144,7 +147,7 @@ async fn example() -> anyhow::Result<()> {
     QueryStat::store(db, stats).await?;
     assert_eq!(1, db.query_one("SELECT count(*) FROM query_stats", &[]).await?.get::<_, i64>(0));
 
-    let group = QueryStat::load(db, &filter, &[]).await?.remove(0);
+    let group = QueryStat::load(db, &filter, &[]).try_next().await?.unwrap()?;
     let stats = group.decompress()?;
     assert_eq!(stats[0].collected_at, now - chrono::Duration::seconds(120));
     assert_eq!(stats[1].collected_at, now - chrono::Duration::seconds(60));

@@ -1,6 +1,6 @@
 use super::{AHashMap, DB_POOL, DateTime, DurationRound, SystemTime, Utc};
 use anyhow::Result;
-use pco_store::{PcoStore, pco_store};
+use pco_store::{PcoStore, TryStreamExt, pco_store};
 
 #[derive(Clone, PcoStore)]
 #[pco_store(name = comparison_pco_stores, timestamp = collected_at, index = [database_id], float_round = 2)]
@@ -96,7 +96,7 @@ pub async fn load() -> Result<()> {
     let database_ids: Vec<i64> = db.query_one("SELECT array_agg(DISTINCT database_id) FROM comparison_pco_stores", &[]).await?.get(0);
     let mut stats = Vec::new();
     let filter = Filter::new(&database_ids, chrono::DateTime::<chrono::Utc>::UNIX_EPOCH..=chrono::Utc::now());
-    for chunk in QueryStat::load(db, &filter, &[]).await? {
+    for chunk in QueryStat::load(db, &filter, &[]).try_collect::<Vec<_>>().await? {
         stats.extend(chunk.decompress()?);
     }
     Ok(())

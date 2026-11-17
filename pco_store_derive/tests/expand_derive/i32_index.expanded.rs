@@ -34,156 +34,128 @@ impl pco_store::Backend<QueryStat> for pco_store::fs::Fs {
         &'a self,
         filter: &'a <QueryStat as pco_store::pco_pack::PcoPack>::Filter,
         fields: &'a [&str],
-    ) -> pco_store::BoxFuture<
+    ) -> pco_store::BoxStream<
         'a,
-        pco_store::anyhow::Result<Vec<pco_store::Chunk<QueryStat>>>,
+        pco_store::anyhow::Result<pco_store::Chunk<QueryStat>>,
     > {
-        Box::pin(async move {
-            let filter_json: pco_store::pco_pack::serde_json::Value = filter
-                .clone()
-                .try_into()?;
-            let resolved = <QueryStat as pco_store::pco_pack::PcoPack>::resolve_fields(
-                &filter_json,
-                fields,
-            )?;
-            let resolved_fields: Vec<String> = resolved
-                .iter()
-                .map(|f| (*f).to_string())
-                .collect();
-            let narrows = |
-                name: &str,
-                filter: &<QueryStat as pco_store::pco_pack::PcoPack>::Filter,
-            | -> bool {
-                let Some(rest) = name.strip_prefix(concat!("query_stats", "~")) else {
-                    return false
-                };
-                let mut segments = rest.splitn(3, '~');
-                let (Some(keys), Some(bounds), Some(digest)) = (
-                    segments.next(),
-                    segments.next(),
-                    segments.next(),
-                ) else { return false };
-                if digest.is_empty() {
-                    return false;
-                }
-                let keys: Vec<&str> = if keys.is_empty() {
-                    Vec::new()
-                } else {
-                    keys.split('|').collect()
-                };
-                if let (Some(f), Some(k)) = (
-                    filter.database_id.as_ref(),
-                    keys.get(0usize).copied(),
-                ) {
-                    match f {
-                        pco_store::pco_pack::I64Filter::Equal(v) => {
-                            if let Ok(parsed) = k.parse::<i64>() {
-                                if parsed != *v {
-                                    return false;
-                                }
-                            }
-                        }
-                        pco_store::pco_pack::I64Filter::Inclusion(vals) => {
-                            if !vals
-                                .iter()
-                                .any(|v| k.parse::<i64>().map(|p| p == *v).unwrap_or(true))
-                            {
+        let narrows = |
+            name: &str,
+            filter: &<QueryStat as pco_store::pco_pack::PcoPack>::Filter,
+        | -> bool {
+            let Some(rest) = name.strip_prefix(concat!("query_stats", "~")) else {
+                return false
+            };
+            let mut segments = rest.splitn(3, '~');
+            let (Some(keys), Some(bounds), Some(digest)) = (
+                segments.next(),
+                segments.next(),
+                segments.next(),
+            ) else { return false };
+            if digest.is_empty() {
+                return false;
+            }
+            let keys: Vec<&str> = if keys.is_empty() {
+                Vec::new()
+            } else {
+                keys.split('|').collect()
+            };
+            if let (Some(f), Some(k)) = (
+                filter.database_id.as_ref(),
+                keys.get(0usize).copied(),
+            ) {
+                match f {
+                    pco_store::pco_pack::I64Filter::Equal(v) => {
+                        if let Ok(parsed) = k.parse::<i64>() {
+                            if parsed != *v {
                                 return false;
                             }
                         }
-                        pco_store::pco_pack::I64Filter::Range { start, end } => {
-                            if let Ok(parsed) = k.parse::<i64>() {
-                                if parsed < *start || parsed > *end {
-                                    return false;
-                                }
+                    }
+                    pco_store::pco_pack::I64Filter::Inclusion(vals) => {
+                        if !vals
+                            .iter()
+                            .any(|v| k.parse::<i64>().map(|p| p == *v).unwrap_or(true))
+                        {
+                            return false;
+                        }
+                    }
+                    pco_store::pco_pack::I64Filter::Range { start, end } => {
+                        if let Ok(parsed) = k.parse::<i64>() {
+                            if parsed < *start || parsed > *end {
+                                return false;
                             }
                         }
                     }
                 }
-                if let (Some(f), Some(k)) = (
-                    filter.granularity.as_ref(),
-                    keys.get(1usize).copied(),
-                ) {
-                    match f {
-                        pco_store::pco_pack::I64Filter::Equal(v) => {
-                            if let Ok(parsed) = k.parse::<i64>() {
-                                if parsed != *v {
-                                    return false;
-                                }
-                            }
-                        }
-                        pco_store::pco_pack::I64Filter::Inclusion(vals) => {
-                            if !vals
-                                .iter()
-                                .any(|v| k.parse::<i64>().map(|p| p == *v).unwrap_or(true))
-                            {
+            }
+            if let (Some(f), Some(k)) = (
+                filter.granularity.as_ref(),
+                keys.get(1usize).copied(),
+            ) {
+                match f {
+                    pco_store::pco_pack::I64Filter::Equal(v) => {
+                        if let Ok(parsed) = k.parse::<i64>() {
+                            if parsed != *v {
                                 return false;
                             }
                         }
-                        pco_store::pco_pack::I64Filter::Range { start, end } => {
-                            if let Ok(parsed) = k.parse::<i64>() {
-                                if parsed < *start || parsed > *end {
-                                    return false;
-                                }
+                    }
+                    pco_store::pco_pack::I64Filter::Inclusion(vals) => {
+                        if !vals
+                            .iter()
+                            .any(|v| k.parse::<i64>().map(|p| p == *v).unwrap_or(true))
+                        {
+                            return false;
+                        }
+                    }
+                    pco_store::pco_pack::I64Filter::Range { start, end } => {
+                        if let Ok(parsed) = k.parse::<i64>() {
+                            if parsed < *start || parsed > *end {
+                                return false;
                             }
                         }
                     }
                 }
-                if let Some(f) = filter.collected_at.as_ref() {
-                    if let Some((head, tail)) = bounds.split_once('.') {
-                        if let (Ok(chunk_start), Ok(chunk_end)) = (
-                            head.parse::<i64>(),
-                            tail.parse::<i64>(),
-                        ) {
-                            match f {
-                                pco_store::pco_pack::TimeFilter::Equal(v) => {
-                                    let at = v.timestamp_micros();
-                                    if chunk_end < at || chunk_start > at {
-                                        return false;
-                                    }
+            }
+            if let Some(f) = filter.collected_at.as_ref() {
+                if let Some((head, tail)) = bounds.split_once('.') {
+                    if let (Ok(chunk_start), Ok(chunk_end)) = (
+                        head.parse::<i64>(),
+                        tail.parse::<i64>(),
+                    ) {
+                        match f {
+                            pco_store::pco_pack::TimeFilter::Equal(v) => {
+                                let at = v.timestamp_micros();
+                                if chunk_end < at || chunk_start > at {
+                                    return false;
                                 }
-                                pco_store::pco_pack::TimeFilter::Inclusion(vals) => {
-                                    if let (Some(first), Some(last)) = (
-                                        vals.first(),
-                                        vals.last(),
-                                    ) {
-                                        if chunk_end < first.timestamp_micros()
-                                            || chunk_start > last.timestamp_micros()
-                                        {
-                                            return false;
-                                        }
-                                    }
-                                }
-                                pco_store::pco_pack::TimeFilter::Range { start, end } => {
-                                    if chunk_end < start.timestamp_micros()
-                                        || chunk_start > end.timestamp_micros()
+                            }
+                            pco_store::pco_pack::TimeFilter::Inclusion(vals) => {
+                                if let (Some(first), Some(last)) = (
+                                    vals.first(),
+                                    vals.last(),
+                                ) {
+                                    if chunk_end < first.timestamp_micros()
+                                        || chunk_start > last.timestamp_micros()
                                     {
                                         return false;
                                     }
                                 }
                             }
+                            pco_store::pco_pack::TimeFilter::Range { start, end } => {
+                                if chunk_end < start.timestamp_micros()
+                                    || chunk_start > end.timestamp_micros()
+                                {
+                                    return false;
+                                }
+                            }
                         }
                     }
                 }
-                true
-            };
-            let mut chunks = Vec::new();
-            for found in self.dur().list_names()? {
-                let name = found.to_string_lossy().into_owned();
-                if !narrows(&name, filter) {
-                    continue;
-                }
-                let Some(bytes) = self.dur().get(&name)? else { continue };
-                let chunk = pco_store::decode_chunk::<QueryStat>(&bytes)?;
-                chunks
-                    .push(pco_store::Chunk {
-                        chunk,
-                        filter: filter.clone(),
-                        fields: resolved_fields.clone(),
-                    });
             }
-            Ok(chunks)
-        })
+            true
+        };
+        pco_store::fs::read_chunks::<QueryStat>(self.dur(), filter, fields, narrows)
     }
     fn delete<'a>(
         &'a self,
@@ -394,12 +366,11 @@ impl pco_store::Backend<QueryStat> for pco_store::pg::Postgres {
         &'a self,
         filter: &'a <QueryStat as pco_store::pco_pack::PcoPack>::Filter,
         fields: &'a [&str],
-    ) -> pco_store::BoxFuture<
+    ) -> pco_store::BoxStream<
         'a,
-        pco_store::anyhow::Result<Vec<pco_store::Chunk<QueryStat>>>,
+        pco_store::anyhow::Result<pco_store::Chunk<QueryStat>>,
     > {
-        Box::pin(async move {
-            type ChunkT = <QueryStat as pco_store::pco_pack::PcoPack>::Chunk;
+        let plan: pco_store::anyhow::Result<_> = (|| {
             let mut where_clauses: Vec<String> = Vec::new();
             let mut params: Vec<&(dyn pco_store::tokio_postgres::types::ToSql + Sync)> = Vec::new();
             if let Some(f) = filter.database_id.as_ref() {
@@ -516,10 +487,11 @@ impl pco_store::Backend<QueryStat> for pco_store::pg::Postgres {
             let filter_json: pco_store::pco_pack::serde_json::Value = filter
                 .clone()
                 .try_into()?;
-            let fields = <QueryStat as pco_store::pco_pack::PcoPack>::resolve_fields(
+            let resolved = <QueryStat as pco_store::pco_pack::PcoPack>::resolve_fields(
                 &filter_json,
                 fields,
             )?;
+            let fields = resolved;
             let known: &[&str] = &[
                 "database_id",
                 "granularity",
@@ -541,84 +513,86 @@ impl pco_store::Backend<QueryStat> for pco_store::pg::Postgres {
                 .iter()
                 .map(|f| (*f).to_string())
                 .collect();
-            let db = self.client().await?;
-            let mut chunks = Vec::new();
-            for row in db.query(&db.prepare_cached(&query_sql).await?, &params).await? {
-                let mut index = 0;
-                chunks
-                    .push(pco_store::Chunk {
-                        chunk: ChunkT {
-                            database_id: if fields.contains(&"database_id") {
-                                let v = row.get::<_, i64>(index);
-                                index += 1;
-                                v
-                            } else {
-                                Default::default()
-                            },
-                            granularity: if fields.contains(&"granularity") {
-                                let v = row.get::<_, i32>(index);
-                                index += 1;
-                                v
-                            } else {
-                                Default::default()
-                            },
-                            start_at: if fields.contains(&"start_at") {
-                                let v = row
-                                    .get::<
-                                        _,
-                                        pco_store::pco_pack::chrono::DateTime<
-                                            pco_store::pco_pack::chrono::Utc,
-                                        >,
-                                    >(index);
-                                index += 1;
-                                v
-                            } else {
-                                Default::default()
-                            },
-                            end_at: if fields.contains(&"end_at") {
-                                let v = row
-                                    .get::<
-                                        _,
-                                        pco_store::pco_pack::chrono::DateTime<
-                                            pco_store::pco_pack::chrono::Utc,
-                                        >,
-                                    >(index);
-                                index += 1;
-                                v
-                            } else {
-                                Default::default()
-                            },
-                            collected_at: if fields.contains(&"collected_at") {
-                                let v = row.get::<_, Option<&[u8]>>(index);
-                                index += 1;
-                                match v {
-                                    Some(b) => {
-                                        pco_store::pco_pack::serde_bytes::ByteBuf::from(b)
-                                    }
-                                    None => Default::default(),
-                                }
-                            } else {
-                                Default::default()
-                            },
-                            calls: if fields.contains(&"calls") {
-                                let v = row.get::<_, Option<&[u8]>>(index);
-                                index += 1;
-                                match v {
-                                    Some(b) => {
-                                        pco_store::pco_pack::serde_bytes::ByteBuf::from(b)
-                                    }
-                                    None => Default::default(),
-                                }
-                            } else {
-                                Default::default()
-                            },
-                        },
-                        filter: filter.clone(),
-                        fields: resolved_fields.clone(),
-                    });
+            Ok((query_sql, params, fields, resolved_fields))
+        })();
+        let (query_sql, params, resolved, resolved_fields) = match plan {
+            Ok(plan) => plan,
+            Err(err) => return pco_store::stream_err::<QueryStat>(err),
+        };
+        let to_chunk = move |row: &pco_store::tokio_postgres::Row| {
+            let mut index = 0;
+            let fields: &[&str] = &resolved;
+            type ChunkT = <QueryStat as pco_store::pco_pack::PcoPack>::Chunk;
+            pco_store::Chunk {
+                chunk: ChunkT {
+                    database_id: if fields.contains(&"database_id") {
+                        let v = row.get::<_, i64>(index);
+                        index += 1;
+                        v
+                    } else {
+                        Default::default()
+                    },
+                    granularity: if fields.contains(&"granularity") {
+                        let v = row.get::<_, i32>(index);
+                        index += 1;
+                        v
+                    } else {
+                        Default::default()
+                    },
+                    start_at: if fields.contains(&"start_at") {
+                        let v = row
+                            .get::<
+                                _,
+                                pco_store::pco_pack::chrono::DateTime<
+                                    pco_store::pco_pack::chrono::Utc,
+                                >,
+                            >(index);
+                        index += 1;
+                        v
+                    } else {
+                        Default::default()
+                    },
+                    end_at: if fields.contains(&"end_at") {
+                        let v = row
+                            .get::<
+                                _,
+                                pco_store::pco_pack::chrono::DateTime<
+                                    pco_store::pco_pack::chrono::Utc,
+                                >,
+                            >(index);
+                        index += 1;
+                        v
+                    } else {
+                        Default::default()
+                    },
+                    collected_at: if fields.contains(&"collected_at") {
+                        let v = row.get::<_, Option<&[u8]>>(index);
+                        index += 1;
+                        match v {
+                            Some(b) => pco_store::pco_pack::serde_bytes::ByteBuf::from(b),
+                            None => Default::default(),
+                        }
+                    } else {
+                        Default::default()
+                    },
+                    calls: if fields.contains(&"calls") {
+                        let v = row.get::<_, Option<&[u8]>>(index);
+                        index += 1;
+                        match v {
+                            Some(b) => pco_store::pco_pack::serde_bytes::ByteBuf::from(b),
+                            None => Default::default(),
+                        }
+                    } else {
+                        Default::default()
+                    },
+                },
+                filter: filter.clone(),
+                fields: resolved_fields.clone(),
             }
-            Ok(chunks)
-        })
+        };
+        pco_store::pg::query_stream::<
+            QueryStat,
+        >(pco_store::pg::Db::Pool(self), query_sql, params, to_chunk)
     }
     /// Deletes matching rows and returns whole chunks with empty
     /// filters, so decompress answers every row the delete touched and
@@ -914,12 +888,11 @@ impl pco_store::Backend<QueryStat> for pco_store::deadpool_postgres::Object {
         &'a self,
         filter: &'a <QueryStat as pco_store::pco_pack::PcoPack>::Filter,
         fields: &'a [&str],
-    ) -> pco_store::BoxFuture<
+    ) -> pco_store::BoxStream<
         'a,
-        pco_store::anyhow::Result<Vec<pco_store::Chunk<QueryStat>>>,
+        pco_store::anyhow::Result<pco_store::Chunk<QueryStat>>,
     > {
-        Box::pin(async move {
-            type ChunkT = <QueryStat as pco_store::pco_pack::PcoPack>::Chunk;
+        let plan: pco_store::anyhow::Result<_> = (|| {
             let mut where_clauses: Vec<String> = Vec::new();
             let mut params: Vec<&(dyn pco_store::tokio_postgres::types::ToSql + Sync)> = Vec::new();
             if let Some(f) = filter.database_id.as_ref() {
@@ -1036,10 +1009,11 @@ impl pco_store::Backend<QueryStat> for pco_store::deadpool_postgres::Object {
             let filter_json: pco_store::pco_pack::serde_json::Value = filter
                 .clone()
                 .try_into()?;
-            let fields = <QueryStat as pco_store::pco_pack::PcoPack>::resolve_fields(
+            let resolved = <QueryStat as pco_store::pco_pack::PcoPack>::resolve_fields(
                 &filter_json,
                 fields,
             )?;
+            let fields = resolved;
             let known: &[&str] = &[
                 "database_id",
                 "granularity",
@@ -1061,84 +1035,86 @@ impl pco_store::Backend<QueryStat> for pco_store::deadpool_postgres::Object {
                 .iter()
                 .map(|f| (*f).to_string())
                 .collect();
-            let db = self;
-            let mut chunks = Vec::new();
-            for row in db.query(&db.prepare_cached(&query_sql).await?, &params).await? {
-                let mut index = 0;
-                chunks
-                    .push(pco_store::Chunk {
-                        chunk: ChunkT {
-                            database_id: if fields.contains(&"database_id") {
-                                let v = row.get::<_, i64>(index);
-                                index += 1;
-                                v
-                            } else {
-                                Default::default()
-                            },
-                            granularity: if fields.contains(&"granularity") {
-                                let v = row.get::<_, i32>(index);
-                                index += 1;
-                                v
-                            } else {
-                                Default::default()
-                            },
-                            start_at: if fields.contains(&"start_at") {
-                                let v = row
-                                    .get::<
-                                        _,
-                                        pco_store::pco_pack::chrono::DateTime<
-                                            pco_store::pco_pack::chrono::Utc,
-                                        >,
-                                    >(index);
-                                index += 1;
-                                v
-                            } else {
-                                Default::default()
-                            },
-                            end_at: if fields.contains(&"end_at") {
-                                let v = row
-                                    .get::<
-                                        _,
-                                        pco_store::pco_pack::chrono::DateTime<
-                                            pco_store::pco_pack::chrono::Utc,
-                                        >,
-                                    >(index);
-                                index += 1;
-                                v
-                            } else {
-                                Default::default()
-                            },
-                            collected_at: if fields.contains(&"collected_at") {
-                                let v = row.get::<_, Option<&[u8]>>(index);
-                                index += 1;
-                                match v {
-                                    Some(b) => {
-                                        pco_store::pco_pack::serde_bytes::ByteBuf::from(b)
-                                    }
-                                    None => Default::default(),
-                                }
-                            } else {
-                                Default::default()
-                            },
-                            calls: if fields.contains(&"calls") {
-                                let v = row.get::<_, Option<&[u8]>>(index);
-                                index += 1;
-                                match v {
-                                    Some(b) => {
-                                        pco_store::pco_pack::serde_bytes::ByteBuf::from(b)
-                                    }
-                                    None => Default::default(),
-                                }
-                            } else {
-                                Default::default()
-                            },
-                        },
-                        filter: filter.clone(),
-                        fields: resolved_fields.clone(),
-                    });
+            Ok((query_sql, params, fields, resolved_fields))
+        })();
+        let (query_sql, params, resolved, resolved_fields) = match plan {
+            Ok(plan) => plan,
+            Err(err) => return pco_store::stream_err::<QueryStat>(err),
+        };
+        let to_chunk = move |row: &pco_store::tokio_postgres::Row| {
+            let mut index = 0;
+            let fields: &[&str] = &resolved;
+            type ChunkT = <QueryStat as pco_store::pco_pack::PcoPack>::Chunk;
+            pco_store::Chunk {
+                chunk: ChunkT {
+                    database_id: if fields.contains(&"database_id") {
+                        let v = row.get::<_, i64>(index);
+                        index += 1;
+                        v
+                    } else {
+                        Default::default()
+                    },
+                    granularity: if fields.contains(&"granularity") {
+                        let v = row.get::<_, i32>(index);
+                        index += 1;
+                        v
+                    } else {
+                        Default::default()
+                    },
+                    start_at: if fields.contains(&"start_at") {
+                        let v = row
+                            .get::<
+                                _,
+                                pco_store::pco_pack::chrono::DateTime<
+                                    pco_store::pco_pack::chrono::Utc,
+                                >,
+                            >(index);
+                        index += 1;
+                        v
+                    } else {
+                        Default::default()
+                    },
+                    end_at: if fields.contains(&"end_at") {
+                        let v = row
+                            .get::<
+                                _,
+                                pco_store::pco_pack::chrono::DateTime<
+                                    pco_store::pco_pack::chrono::Utc,
+                                >,
+                            >(index);
+                        index += 1;
+                        v
+                    } else {
+                        Default::default()
+                    },
+                    collected_at: if fields.contains(&"collected_at") {
+                        let v = row.get::<_, Option<&[u8]>>(index);
+                        index += 1;
+                        match v {
+                            Some(b) => pco_store::pco_pack::serde_bytes::ByteBuf::from(b),
+                            None => Default::default(),
+                        }
+                    } else {
+                        Default::default()
+                    },
+                    calls: if fields.contains(&"calls") {
+                        let v = row.get::<_, Option<&[u8]>>(index);
+                        index += 1;
+                        match v {
+                            Some(b) => pco_store::pco_pack::serde_bytes::ByteBuf::from(b),
+                            None => Default::default(),
+                        }
+                    } else {
+                        Default::default()
+                    },
+                },
+                filter: filter.clone(),
+                fields: resolved_fields.clone(),
             }
-            Ok(chunks)
-        })
+        };
+        pco_store::pg::query_stream::<
+            QueryStat,
+        >(pco_store::pg::Db::Borrowed(self), query_sql, params, to_chunk)
     }
     /// Deletes matching rows and returns whole chunks with empty
     /// filters, so decompress answers every row the delete touched and

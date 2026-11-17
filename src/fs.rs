@@ -9,6 +9,10 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use anyhow::{Context, Result, bail};
+use async_stream::try_stream;
+use pco_pack::PcoPack;
+
+use crate::backend::{BoxStream, Chunk, decode_chunk};
 
 static TMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -150,6 +154,39 @@ impl Fs {
     pub fn sweep_stale_temps(&self) -> Result<usize> {
         self.dur.sweep_stale_temps()
     }
+}
+
+/// One model's streamed `load` over a durable directory: one listing, then
+/// one chunk per matching name as its file is read. Listing and field
+/// resolution happen at first poll, so nothing touches the directory until
+/// the consumer pulls. Reads stay synchronous (local files need no async
+/// stack), but delivery is incremental: the consumer sees chunk k before
+/// file k+1 opens, and stops paying the moment it stops pulling. `narrows`
+/// is the model's generated name-time check, answering from the file name
+/// alone so nonmatching files are never opened.
+pub fn read_chunks<'a, M>(
+    dur: &'a DurDir, filter: &'a M::Filter, fields: &'a [&str], narrows: impl Fn(&str, &M::Filter) -> bool + Send + 'a,
+) -> BoxStream<'a, Result<Chunk<M>>>
+where
+    M: PcoPack + 'a,
+    M::Chunk: Send,
+    M::Filter: Clone + Send + Sync,
+    <M::Filter as TryInto<pco_pack::serde_json::Value>>::Error: Into<anyhow::Error>,
+{
+    let stream = try_stream! {
+        let filter_json: pco_pack::serde_json::Value = filter.clone().try_into().map_err(Into::into)?;
+        let resolved_fields: Vec<String> = M::resolve_fields(&filter_json, fields)?.iter().map(|f| (*f).to_string()).collect();
+        for found in dur.list_names()? {
+            let name = found.to_string_lossy().into_owned();
+            if !narrows(&name, filter) {
+                continue;
+            }
+            let Some(bytes) = dur.get(&name)? else { continue };
+            let chunk = decode_chunk::<M>(&bytes)?;
+            yield Chunk { chunk, filter: filter.clone(), fields: resolved_fields.clone() };
+        }
+    };
+    Box::pin(stream)
 }
 
 /// Keep only ASCII letters and digits, mapping every other character to `-`.
