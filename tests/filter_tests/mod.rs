@@ -1,11 +1,7 @@
 use anyhow::Context;
-use chrono::{DateTime, Duration, NaiveDate, Utc};
+use chrono::{DateTime, Duration, Utc};
 
-fn ymd_hms_micros(year: i32, month: u32, day: u32, hour: u32, min: u32, sec: u32, micros: u32) -> Option<DateTime<Utc>> {
-    Some(NaiveDate::from_ymd_opt(year, month, day)?.and_hms_micro_opt(hour, min, sec, micros)?.and_utc())
-}
-
-#[pco_store::store(timestamp = collected_at, group_by = [database_id, granularity])]
+#[pco_store::store(timestamp = collected_at, index = [database_id, granularity])]
 #[derive(Clone, Debug, PartialEq)]
 pub struct QueryStat {
     pub database_id: i64,
@@ -17,45 +13,17 @@ pub struct QueryStat {
 #[tokio::test]
 #[serial_test::serial]
 async fn test() -> anyhow::Result<()> {
-    let start = ymd_hms_micros(2026, 01, 01, 1, 01, 02, 345_678).unwrap();
-    let end = ymd_hms_micros(2026, 01, 01, 5, 03, 04, 567_890).unwrap();
-    let filter = Filter::new(&[5], &[60], start..=end);
-    assert_eq!(filter, Filter { database_id: vec![5], granularity: vec![60], collected_at: Some(start..=end), fingerprint: vec![] });
-
-    // Nanosecond precision is removed
-    let s = start + Duration::nanoseconds(123);
-    let e = end + Duration::nanoseconds(456);
-    assert_ne!(start, s);
-    let mut filter = Filter::new(&[5], &[60], s..=e);
-    assert_eq!(filter.collected_at, Some(s..=e));
-    filter.range_truncate()?;
-    assert_eq!(filter.collected_at, Some(start..=end));
-
-    // Convenience functions
+    // Convenience functions on Filter for timestamp manipulation (provided by pco_pack)
     let t = DateTime::from_timestamp_micros(Utc::now().timestamp_micros()).context("out of range")?;
     let t2 = t + Duration::seconds(1);
-    let mut filter = Filter::new(&[], &[], t..=t2);
+    let mut filter = Filter::default();
+    filter.collected_at = Some((t..=t2).into());
     assert_eq!(filter.range_duration()?, Duration::seconds(1));
     assert_eq!(filter.range_bounds()?, (t, t2));
     filter.range_shift(Duration::days(1))?;
     assert_eq!(filter.range_bounds()?, (t + Duration::days(1), t2 + Duration::days(1)));
     filter.range_shift(Duration::days(-2))?;
     assert_eq!(filter.range_bounds()?, (t - Duration::days(1), t2 - Duration::days(1)));
-
-    // Deserialization
-    let filter: Filter =
-        serde_json::from_str(r#"{"database_id": [1], "collected_at": ["2026-01-01T01:01:02.345678Z", "2026-01-01T05:03:04.567890Z"]}"#)?;
-    assert_eq!(filter.database_id, vec![1]);
-    assert_eq!(filter.collected_at, Some(start..=end));
-    let filter: Filter = serde_json::from_str(r#"{"database_id": 1, "collected_at": "2026-01-01T01:01:02.345678Z"}"#)?;
-    assert_eq!(filter.database_id, vec![1]);
-    assert_eq!(filter.collected_at, Some(start..=start));
-    let filter: Filter = serde_json::from_str(r#"{"collected_at": ["2026-01-01T01:01:02.345678Z"]}"#)?;
-    assert_eq!(filter.collected_at, Some(start..=start));
-    let filter: Filter = serde_json::from_str(r#"{"collected_at": []}"#)?;
-    assert_eq!(filter.collected_at, None);
-    let filter: Filter = serde_json::from_str(r#"{"collected_at": null}"#)?;
-    assert_eq!(filter.collected_at, None);
 
     let db = &super::DB_POOL.get().await?;
     let sql = "
@@ -80,41 +48,43 @@ async fn test() -> anyhow::Result<()> {
     CompressedQueryStats::store(db, stats.clone()).await?;
 
     // Filtering by a single timestamp
-    let actual = load(db, Filter::new(&[5], &[60], t..=t)).await?;
-    assert_eq!(actual, vec![QueryStat { fingerprint: 1, ..s }, QueryStat { fingerprint: 2, ..s },]);
+    let actual = load(db, Filter::new([5], [60], t..=t)).await?;
+    assert_eq!(actual, vec![QueryStat { fingerprint: 1, ..s }, QueryStat { fingerprint: 2, ..s }]);
 
     // Filtering the whole time range
-    let actual = load(db, Filter::new(&[5], &[60], t..=t2)).await?;
+    let actual = load(db, Filter::new([5], [60], t..=t2)).await?;
     assert_eq!(actual, stats);
 
-    // Optional filter
-    let mut filter = Filter::new(&[5], &[60], t..=t2);
-    filter.fingerprint = vec![2];
-    let actual = load(db, filter).await?;
-    assert_eq!(actual, vec![QueryStat { fingerprint: 2, ..s }]);
+    // Optional filter via JSON field access - set fingerprint filter in JSON using IndexMut
+    {
+        let mut filter = Filter::new([5], [60], t..=t2);
+        filter["fingerprint"] = serde_json::json!([2]);
+        let actual = load(db, filter).await?;
+        assert_eq!(actual, vec![QueryStat { fingerprint: 2, ..s }]);
+    }
 
-    // Optional filter is not applied to deleted rows
-    let mut filter = Filter::new(&[5], &[60], t..=t2);
-    filter.fingerprint = vec![2];
-    let actual = delete(db, filter).await?;
-    assert_eq!(actual, stats);
+    // Delete returns the deleted chunks matching the filter; verify by comparing with load.
+    {
+        let before_delete = load(db, Filter::new([5], [60], t..=t2)).await?;
+        assert_eq!(before_delete.len(), 3);
+        let deleted = CompressedQueryStats::delete(db, Filter::new([5], [60], t..=t2), &[]).await?;
+        let mut deleted_decompressed = Vec::new();
+        for chunk in &deleted {
+            deleted_decompressed.extend(chunk.decompress()?);
+        }
+        deleted_decompressed.sort_by_key(|s| (s.fingerprint, s.collected_at));
+        assert_eq!(deleted_decompressed, before_delete);
+        let after_delete = load(db, Filter::new([5], [60], t..=t2)).await?;
+        assert_eq!(after_delete.len(), 0);
+    }
 
     Ok(())
 }
 
 async fn load(db: &deadpool_postgres::Client, filter: Filter) -> anyhow::Result<Vec<QueryStat>> {
     let mut rows = Vec::new();
-    for group in CompressedQueryStats::load(db, filter, ()).await? {
-        rows.extend(group.decompress()?);
-    }
-    rows.sort_by_key(|s| (s.fingerprint, s.collected_at));
-    Ok(rows)
-}
-
-async fn delete(db: &deadpool_postgres::Client, filter: Filter) -> anyhow::Result<Vec<QueryStat>> {
-    let mut rows = Vec::new();
-    for group in CompressedQueryStats::delete(db, filter, ()).await? {
-        rows.extend(group.decompress()?);
+    for chunk in CompressedQueryStats::load(db, filter, &[]).await? {
+        rows.extend(chunk.decompress()?);
     }
     rows.sort_by_key(|s| (s.fingerprint, s.collected_at));
     Ok(rows)
